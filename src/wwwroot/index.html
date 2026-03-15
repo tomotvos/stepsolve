@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>StepSolve</title>
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+    <header>
+        <h1>StepSolve</h1>
+        <span id="mode-badge">--</span>
+        <button id="theme-toggle" aria-label="Toggle night mode">🌙</button>
+    </header>
+    <main>
+        <section id="solve-display">
+            <div class="field"><label>RA</label><span id="ra">--</span></div>
+            <div class="field"><label>Dec</label><span id="dec">--</span></div>
+            <div class="field"><label>Confidence</label><span id="confidence">--</span></div>
+            <div class="field"><label>Solver</label><span id="solver">--</span></div>
+            <div class="field"><label>Solve Time</label><span id="solve-time">--</span></div>
+            <div class="field"><label>Last Solve</label><span id="last-solve-time">--</span></div>
+        </section>
+        <section id="state-display">
+            <div class="field"><label>State</label><span id="state">--</span></div>
+        </section>
+    </main>
+    <script src="/js/app.js"></script>
+</body>
+</html>

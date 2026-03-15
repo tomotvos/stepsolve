@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>StepSolve</RootNamespace>
+    <AssemblyName>stepsolve</AssemblyName>
+    <!--
+      AOT cross-compilation from macOS to linux-arm64 requires a Linux cross-linker
+      toolchain (not available natively on Mac). Options for Pi deployment:
+        1. Self-contained publish from Mac (no AOT) — larger binary (~80MB) but works
+        2. Build natively on Pi with dotnet SDK installed
+        3. Docker cross-build with linux-arm64 image
+        4. GitHub Actions CI with linux-arm64 runner
+      For now, use self-contained publish. Enable AOT when building on Linux.
+    -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>

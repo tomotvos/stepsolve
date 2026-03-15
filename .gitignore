@@ -1,0 +1,20 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.dll
+*.exe
+
+## IDE
+.vs/
+.vscode/
+*.swp
+*~
+
+## macOS
+.DS_Store
+
+## Publish output
+publish/
