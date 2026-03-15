@@ -14,6 +14,7 @@ public sealed class StepSolveService : BackgroundService
     private readonly ICameraCapture _camera;
     private readonly ISolver _solver;
     private readonly SolveState _state;
+    private readonly OnStepClient _onstep;
     private readonly IOptionsMonitor<StepSolveOptions> _options;
     private readonly ILogger<StepSolveService> _logger;
 
@@ -25,12 +26,14 @@ public sealed class StepSolveService : BackgroundService
         ICameraCapture camera,
         ISolver solver,
         SolveState state,
+        OnStepClient onstep,
         IOptionsMonitor<StepSolveOptions> options,
         ILogger<StepSolveService> logger)
     {
         _camera = camera;
         _solver = solver;
         _state = state;
+        _onstep = onstep;
         _options = options;
         _logger = logger;
     }
@@ -97,6 +100,9 @@ public sealed class StepSolveService : BackgroundService
                 "Solved: RA={Ra:F4}° Dec={Dec:F4}° Conf={Conf:F2} Time={Time:F1}s Solver={Solver}",
                 result.RaDeg, result.DecDeg, result.Confidence,
                 result.SolveTime.TotalSeconds, result.SolverName);
+
+            // Sync to OnStep (fire-and-forget — does not block solve loop)
+            _ = _onstep.SyncAsync(result, _state, ct);
         }
         else
         {
