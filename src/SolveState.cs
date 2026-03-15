@@ -11,6 +11,7 @@ public sealed class SolveState
     private SolveResult? _lastResult;
     private DateTimeOffset _lastSolveTime;
     private string _state = "idle"; // idle, capturing, solving, solved, error
+    private string? _lastImagePath;
 
     public (SolveResult? Result, DateTimeOffset Timestamp, string State) Current
     {
@@ -23,13 +24,20 @@ public sealed class SolveState
         }
     }
 
-    public void UpdateResult(SolveResult result)
+    public string? LastImagePath
+    {
+        get { lock (_lock) { return _lastImagePath; } }
+    }
+
+    public void UpdateResult(SolveResult result, string? imagePath = null)
     {
         lock (_lock)
         {
             _lastResult = result;
             _lastSolveTime = DateTimeOffset.UtcNow;
             _state = "solved";
+            if (imagePath != null)
+                _lastImagePath = imagePath;
         }
     }
 

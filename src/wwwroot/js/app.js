@@ -98,8 +98,6 @@
         if (!mode) return;
         var lower = mode.toLowerCase();
         els.modeSelect.value = lower;
-        // Solve Now only works when not already solving
-        els.solveNowBtn.disabled = lower === 'solve';
     }
 
     function updateOnStep(onstep) {
@@ -271,12 +269,13 @@
 
     els.modeSelect.addEventListener('change', function () {
         var mode = els.modeSelect.value;
-        fetch('/mode?mode=' + encodeURIComponent(mode), { method: 'POST' })
+        fetch('/mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: mode })
+        })
             .then(function (r) {
-                if (!r.ok) {
-                    // Revert on failure
-                    pollStatus();
-                }
+                if (!r.ok) pollStatus();
             })
             .catch(function () { pollStatus(); });
     });
@@ -290,6 +289,17 @@
         els.logContainer.innerHTML = '';
         state.logEntryCount = 0;
         els.logCount.textContent = '0 entries';
+    });
+
+    els.solveNowBtn.addEventListener('click', function () {
+        els.solveNowBtn.disabled = true;
+        fetch('/solve?demo=1', { method: 'POST' })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data && data.ra != null) updateSolveDisplay(data);
+            })
+            .catch(function () { /* ignore */ })
+            .finally(function () { els.solveNowBtn.disabled = false; });
     });
 
     // -- Init --

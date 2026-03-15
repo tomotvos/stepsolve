@@ -15,6 +15,7 @@ public class AstrometrySolverTests
         Assert.Contains("--no-plots", args);
         Assert.Contains("--sigma 5", args);
         Assert.Contains("--depth 20", args);
+        Assert.Contains("--index-dir /usr/share/astrometry", args);
         Assert.DoesNotContain("--ra", args);
         Assert.DoesNotContain("--dec", args);
     }
@@ -48,6 +49,15 @@ public class AstrometrySolverTests
 
         Assert.Contains("--sigma 10", args);
         Assert.Contains("--depth 40", args);
+    }
+
+    [Fact]
+    public void BuildArgs_WithCustomIndexPath()
+    {
+        var opts = new AstrometryOptions { IndexPath = "/opt/astrometry/indexes" };
+        var args = AstrometrySolver.BuildArgs("/tmp/test.jpg", opts, hints: null, keepXyPath: null);
+
+        Assert.Contains("--index-dir /opt/astrometry/indexes", args);
     }
 
     [Fact]

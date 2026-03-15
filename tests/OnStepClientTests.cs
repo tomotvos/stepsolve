@@ -77,14 +77,44 @@ public class OnStepClientTests
             MaxSyncDeltaDeg = 5.0
         });
         var client = new OnStepClient(opts, NullLogger<OnStepClient>.Instance);
-        var state = new SolveState();
 
-        // Set previous position far away from new solve
-        state.UpdateResult(new SolveResult(100, 50, null, null, 0.9, TimeSpan.Zero, "test"));
+        // First sync succeeds — establishes the baseline position.
+        // We need a listening server for this to work, so use SendSyncCommands directly
+        // to simulate a successful sync instead.
+        // Directly test via a mock server to establish baseline, then attempt big jump.
+        var port = FindAvailablePort();
+        var firstOpts = new OnStepOptions { Enabled = true, Host = "127.0.0.1", Port = port, MaxSyncDeltaDeg = 5.0 };
+        var clientOpts = new TestOptionsMonitor<OnStepOptions>(firstOpts);
+        client = new OnStepClient(clientOpts, NullLogger<OnStepClient>.Instance);
 
-        // Solve result is 20° away — should exceed 5° threshold
-        var result = new SolveResult(120, 50, null, null, 0.9, TimeSpan.Zero, "test");
-        await client.SyncAsync(result, state, CancellationToken.None);
+        // Start mock server for first sync
+        var mockServer = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
+        mockServer.Start();
+        var serverTask = Task.Run(async () =>
+        {
+            using var sc = await mockServer.AcceptTcpClientAsync();
+            using var stream = sc.GetStream();
+            var buf = new byte[256];
+            while (true)
+            {
+                var n = await stream.ReadAsync(buf);
+                if (n == 0) break;
+                var data = System.Text.Encoding.ASCII.GetString(buf, 0, n);
+                if (data.Contains(":CM#")) break;
+            }
+        });
+
+        // First sync at (100, 50) — establishes baseline
+        var firstResult = new SolveResult(100, 50, null, null, 0.9, TimeSpan.Zero, "test");
+        await client.SyncAsync(firstResult, CancellationToken.None);
+        await serverTask;
+        mockServer.Stop();
+
+        Assert.Equal("ok", client.LastSyncResult);
+
+        // Now attempt a solve 20° away — should exceed 5° threshold and be skipped
+        var bigJump = new SolveResult(120, 50, null, null, 0.9, TimeSpan.Zero, "test");
+        await client.SyncAsync(bigJump, CancellationToken.None);
 
         Assert.Contains("skipped", client.LastSyncResult);
     }
@@ -94,10 +124,9 @@ public class OnStepClientTests
     {
         var opts = new TestOptionsMonitor<OnStepOptions>(new OnStepOptions { Enabled = false });
         var client = new OnStepClient(opts, NullLogger<OnStepClient>.Instance);
-        var state = new SolveState();
 
         var result = new SolveResult(100, 50, null, null, 0.9, TimeSpan.Zero, "test");
-        await client.SyncAsync(result, state, CancellationToken.None);
+        await client.SyncAsync(result, CancellationToken.None);
 
         // Should not have attempted sync
         Assert.Null(client.LastSyncResult);
@@ -170,10 +199,9 @@ public class OnStepClientTests
             Port = 19999  // Nothing listening here
         });
         var client = new OnStepClient(opts, NullLogger<OnStepClient>.Instance);
-        var state = new SolveState();
 
         var result = new SolveResult(100, 50, null, null, 0.9, TimeSpan.Zero, "test");
-        await client.SyncAsync(result, state, CancellationToken.None);
+        await client.SyncAsync(result, CancellationToken.None);
 
         Assert.NotNull(client.LastSyncResult);
         Assert.StartsWith("error:", client.LastSyncResult);

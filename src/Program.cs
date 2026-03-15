@@ -25,6 +25,9 @@ builder.Services.AddSingleton<OnStepClient>();
 // WebSocket broadcaster for real-time dashboard updates
 builder.Services.AddSingleton<WebSocketBroadcaster>();
 
+// Wire application logs to WebSocket for real-time dashboard log stream
+builder.Services.AddSingleton<ILoggerProvider, WebSocketLoggerProvider>();
+
 // Background solve loop
 builder.Services.AddHostedService<StepSolveService>();
 
@@ -81,9 +84,20 @@ app.Map("/ws", async (HttpContext ctx, WebSocketBroadcaster broadcaster) =>
 });
 
 // POST /mode — change operating mode (solve/demo/idle)
-app.MapPost("/mode", (HttpContext ctx, IConfiguration config) =>
+// Accepts JSON body { "mode": "solve" } per PRD, or query string for convenience
+app.MapPost("/mode", async (HttpContext ctx, IConfiguration config) =>
 {
-    var mode = ctx.Request.Query["mode"].ToString().ToLowerInvariant();
+    string mode;
+    if (ctx.Request.HasJsonContentType())
+    {
+        var body = await ctx.Request.ReadFromJsonAsync<ModeRequest>();
+        mode = body?.Mode?.ToLowerInvariant() ?? "";
+    }
+    else
+    {
+        mode = ctx.Request.Query["mode"].ToString().ToLowerInvariant();
+    }
+
     if (mode is not ("solve" or "demo" or "idle"))
         return Results.BadRequest(new { error = "Mode must be solve, demo, or idle" });
 
@@ -91,7 +105,140 @@ app.MapPost("/mode", (HttpContext ctx, IConfiguration config) =>
     return Results.Ok(new { mode });
 });
 
+// GET /settings — current configuration
+app.MapGet("/settings", (
+    IOptions<StepSolveOptions> stepOpts,
+    IOptions<SolverOptions> solverOpts,
+    IOptions<CameraOptions> cameraOpts,
+    IOptions<OnStepOptions> onstepOpts) =>
+{
+    return Results.Ok(new
+    {
+        stepSolve = stepOpts.Value,
+        solver = solverOpts.Value,
+        camera = cameraOpts.Value,
+        onstep = onstepOpts.Value,
+    });
+});
+
+// POST /settings — update configuration (partial merge)
+app.MapPost("/settings", async (HttpContext ctx, IConfiguration config) =>
+{
+    var body = await ctx.Request.ReadFromJsonAsync<Dictionary<string, Dictionary<string, object>>>();
+    if (body == null)
+        return Results.BadRequest(new { error = "Expected JSON object with section keys" });
+
+    foreach (var (section, values) in body)
+    {
+        foreach (var (key, value) in values)
+        {
+            config[$"{section}:{key}"] = value?.ToString();
+        }
+    }
+
+    return Results.Ok(new { updated = true });
+});
+
+// POST /solve — on-demand solve: demo pulse (?demo=1) or uploaded image
+app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, WebSocketBroadcaster ws, OnStepClient onstep, IOptions<StepSolveOptions> opts) =>
+{
+    if (ctx.Request.Query.ContainsKey("demo"))
+    {
+        // Demo solve — generate a fake result
+        var demoResult = new SolveResult(
+            RaDeg: Random.Shared.NextDouble() * 360.0,
+            DecDeg: Random.Shared.NextDouble() * 180.0 - 90.0,
+            RollDeg: null,
+            PlateScaleArcsecPerPx: null,
+            Confidence: 0.99,
+            SolveTime: TimeSpan.FromMilliseconds(12),
+            SolverName: "demo"
+        );
+        state.UpdateResult(demoResult);
+        _ = ws.BroadcastSolve(demoResult);
+        return Results.Ok(new
+        {
+            ra = demoResult.RaDeg,
+            dec = demoResult.DecDeg,
+            confidence = demoResult.Confidence,
+            solver = demoResult.SolverName,
+            solveTimeMs = demoResult.SolveTime.TotalMilliseconds,
+        });
+    }
+
+    // Image upload solve
+    if (!ctx.Request.HasFormContentType || ctx.Request.Form.Files.Count == 0)
+        return Results.BadRequest(new { error = "Provide an image file or use ?demo=1" });
+
+    var file = ctx.Request.Form.Files[0];
+    var tempDir = Path.Combine(AppContext.BaseDirectory, "images");
+    Directory.CreateDirectory(tempDir);
+    var tempPath = Path.Combine(tempDir, $"upload_{DateTimeOffset.UtcNow.Ticks}.jpg");
+
+    await using (var stream = File.Create(tempPath))
+    {
+        await file.CopyToAsync(stream, ctx.RequestAborted);
+    }
+
+    var result = await solver.SolveAsync(tempPath, hints: null, ctx.RequestAborted);
+    if (result.IsValid)
+    {
+        state.UpdateResult(result, tempPath);
+        _ = ws.BroadcastSolve(result);
+        _ = ws.BroadcastStatus(opts.Value.Mode, "solved", onstep);
+    }
+
+    return Results.Ok(new
+    {
+        ra = result.RaDeg,
+        dec = result.DecDeg,
+        confidence = result.Confidence,
+        solver = result.SolverName,
+        solveTimeMs = result.SolveTime.TotalMilliseconds,
+        valid = result.IsValid,
+    });
+});
+
+// GET /solve/image — last solved image
+app.MapGet("/solve/image", (SolveState state) =>
+{
+    var path = state.LastImagePath;
+    if (path == null || !File.Exists(path))
+        return Results.NotFound(new { error = "No image available" });
+
+    return Results.File(path, "image/jpeg");
+});
+
+// POST /system/shutdown — graceful shutdown (Linux only)
+app.MapPost("/system/shutdown", (IHostApplicationLifetime lifetime) =>
+{
+    if (!OperatingSystem.IsLinux())
+        return Results.StatusCode(503);
+
+    lifetime.StopApplication();
+    return Results.Ok(new { status = "shutting down" });
+});
+
+// POST /system/restart — graceful reboot (Linux only)
+app.MapPost("/system/restart", () =>
+{
+    if (!OperatingSystem.IsLinux())
+        return Results.StatusCode(503);
+
+    // Schedule reboot then return response
+    _ = Task.Run(async () =>
+    {
+        await Task.Delay(1000);
+        System.Diagnostics.Process.Start("sudo", "reboot");
+    });
+
+    return Results.Ok(new { status = "restarting" });
+});
+
 // GET / — serve the dashboard (falls through to static files wwwroot/index.html)
 app.MapFallbackToFile("index.html");
 
 app.Run();
+
+// Request DTOs
+record ModeRequest(string? Mode);

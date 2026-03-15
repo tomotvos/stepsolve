@@ -100,4 +100,31 @@ public class SolveStateTests
         var (ra, dec) = state.GetCoordinates();
         Assert.InRange(ra, 0, 99);
     }
+
+    [Fact]
+    public void LastImagePath_InitiallyNull()
+    {
+        var state = new SolveState();
+        Assert.Null(state.LastImagePath);
+    }
+
+    [Fact]
+    public void UpdateResult_WithImagePath_StoresIt()
+    {
+        var state = new SolveState();
+        var result = new SolveResult(100, 50, null, null, 0.9, TimeSpan.Zero, "test");
+        state.UpdateResult(result, "/tmp/capture.jpg");
+
+        Assert.Equal("/tmp/capture.jpg", state.LastImagePath);
+    }
+
+    [Fact]
+    public void UpdateResult_WithoutImagePath_PreservesExisting()
+    {
+        var state = new SolveState();
+        state.UpdateResult(new SolveResult(100, 50, null, null, 0.9, TimeSpan.Zero, "test"), "/tmp/first.jpg");
+        state.UpdateResult(new SolveResult(200, 60, null, null, 0.9, TimeSpan.Zero, "test"));
+
+        Assert.Equal("/tmp/first.jpg", state.LastImagePath);
+    }
 }

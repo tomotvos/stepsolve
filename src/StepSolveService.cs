@@ -100,7 +100,7 @@ public sealed class StepSolveService : BackgroundService
 
         if (result.IsValid)
         {
-            _state.UpdateResult(result);
+            _state.UpdateResult(result, imagePath);
             _logger.LogInformation(
                 "Solved: RA={Ra:F4}° Dec={Dec:F4}° Conf={Conf:F2} Time={Time:F1}s Solver={Solver}",
                 result.RaDeg, result.DecDeg, result.Confidence,
@@ -111,7 +111,7 @@ public sealed class StepSolveService : BackgroundService
             _ = _ws.BroadcastStatus(_options.CurrentValue.Mode, "solved", _onstep);
 
             // Sync to OnStep (fire-and-forget — does not block solve loop)
-            _ = _onstep.SyncAsync(result, _state, ct);
+            _ = _onstep.SyncAsync(result, ct);
         }
         else
         {

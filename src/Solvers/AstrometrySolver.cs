@@ -138,6 +138,7 @@ public sealed partial class AstrometrySolver : ISolver
             "--new-fits", "none",
             "--sigma", opts.Sigma.ToString(),
             "--depth", opts.Depth.ToString(),
+            "--index-dir", opts.IndexPath,
             "--uniformize", "0",
             "--no-remove-lines",
             "--match", "none",
