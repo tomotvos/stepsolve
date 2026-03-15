@@ -22,6 +22,9 @@ builder.Services.AddSingleton<ISolver, AstrometrySolver>();
 // Background solve loop
 builder.Services.AddHostedService<StepSolveService>();
 
+// LX200 TCP server for SkySafari
+builder.Services.AddHostedService<Lx200Server>();
+
 // Configure Kestrel to listen on the configured web port
 builder.WebHost.ConfigureKestrel((context, options) =>
 {
