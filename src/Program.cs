@@ -25,6 +25,9 @@ builder.Services.AddSingleton<OnStepClient>();
 // WebSocket broadcaster for real-time dashboard updates
 builder.Services.AddSingleton<WebSocketBroadcaster>();
 
+// Settings service — validation and persistence to disk
+builder.Services.AddSingleton<SettingsService>();
+
 // Wire application logs to WebSocket for real-time dashboard log stream
 builder.Services.AddSingleton<ILoggerProvider, WebSocketLoggerProvider>();
 
@@ -121,20 +124,16 @@ app.MapGet("/settings", (
     });
 });
 
-// POST /settings — update configuration (partial merge)
-app.MapPost("/settings", async (HttpContext ctx, IConfiguration config) =>
+// POST /settings — validate, apply, and persist configuration changes
+app.MapPost("/settings", async (HttpContext ctx, SettingsService settingsSvc) =>
 {
     var body = await ctx.Request.ReadFromJsonAsync<Dictionary<string, Dictionary<string, object>>>();
     if (body == null)
         return Results.BadRequest(new { error = "Expected JSON object with section keys" });
 
-    foreach (var (section, values) in body)
-    {
-        foreach (var (key, value) in values)
-        {
-            config[$"{section}:{key}"] = value?.ToString();
-        }
-    }
+    var error = settingsSvc.ApplyAndPersist(body);
+    if (error != null)
+        return Results.BadRequest(new { error });
 
     return Results.Ok(new { updated = true });
 });
@@ -163,6 +162,7 @@ app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, 
             confidence = demoResult.Confidence,
             solver = demoResult.SolverName,
             solveTimeMs = demoResult.SolveTime.TotalMilliseconds,
+            imageUrl = state.LastImagePath != null ? "/solve/image" : (string?)null,
         });
     }
 
@@ -196,6 +196,7 @@ app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, 
         solver = result.SolverName,
         solveTimeMs = result.SolveTime.TotalMilliseconds,
         valid = result.IsValid,
+        imageUrl = result.IsValid ? "/solve/image" : (string?)null,
     });
 });
 

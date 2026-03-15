@@ -107,6 +107,7 @@ public class WebSocketBroadcasterTests
             Assert.Equal("astrometry", root.GetProperty("solver").GetString());
             Assert.Equal(2340, root.GetProperty("solveTimeMs").GetDouble(), 0);
             Assert.True(root.TryGetProperty("timestamp", out _));
+            Assert.Equal("/solve/image", root.GetProperty("imageUrl").GetString());
 
             await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
         }

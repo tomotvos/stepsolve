@@ -31,6 +31,15 @@
             <div class="field"><label>Last Solve</label><span id="last-solve-time">--</span></div>
         </section>
 
+        <!-- Image preview -->
+        <section id="image-preview">
+            <h2>Captured Image</h2>
+            <div id="image-container">
+                <img id="preview-img" alt="Last captured image" />
+                <div id="no-image-msg">No image captured yet</div>
+            </div>
+        </section>
+
         <!-- Solve Now button -->
         <section id="action-bar">
             <button id="solve-now-btn" class="btn-primary">Solve Now</button>
@@ -43,6 +52,72 @@
             <div class="field"><label>Last Sync</label><span id="onstep-last-sync">--</span></div>
             <div class="field"><label>Result</label><span id="onstep-result">--</span></div>
         </section>
+
+        <!-- Settings panel -->
+        <details id="settings-section">
+            <summary>Settings</summary>
+            <div class="settings-group">
+                <h3>Solver</h3>
+                <div class="setting-field">
+                    <label for="set-backend">Backend</label>
+                    <select id="set-backend">
+                        <option value="astrometry">Astrometry</option>
+                        <option value="cedar">Cedar</option>
+                        <option value="tetra3">Tetra3</option>
+                    </select>
+                </div>
+                <div class="setting-field">
+                    <label for="set-hint-timeout">Hint Timeout (s)</label>
+                    <input id="set-hint-timeout" type="number" min="1" max="120" />
+                </div>
+                <div class="setting-field">
+                    <label for="set-solve-radius">Solve Radius (°)</label>
+                    <input id="set-solve-radius" type="number" min="0.1" max="180" step="0.1" />
+                </div>
+            </div>
+            <div class="settings-group">
+                <h3>Camera</h3>
+                <div class="setting-field">
+                    <label for="set-shutter">Shutter (µs)</label>
+                    <input id="set-shutter" type="number" min="100" max="30000000" />
+                </div>
+                <div class="setting-field">
+                    <label for="set-gain">Gain</label>
+                    <input id="set-gain" type="number" min="0" max="100" step="0.1" />
+                </div>
+                <div class="setting-field">
+                    <label for="set-width">Width (px)</label>
+                    <input id="set-width" type="number" min="320" max="4096" />
+                </div>
+                <div class="setting-field">
+                    <label for="set-height">Height (px)</label>
+                    <input id="set-height" type="number" min="240" max="4096" />
+                </div>
+            </div>
+            <div class="settings-group">
+                <h3>OnStep</h3>
+                <div class="setting-field">
+                    <label for="set-onstep-enabled">Enabled</label>
+                    <input id="set-onstep-enabled" type="checkbox" />
+                </div>
+                <div class="setting-field">
+                    <label for="set-onstep-host">Host</label>
+                    <input id="set-onstep-host" type="text" />
+                </div>
+                <div class="setting-field">
+                    <label for="set-onstep-port">Port</label>
+                    <input id="set-onstep-port" type="number" min="1" max="65535" />
+                </div>
+                <div class="setting-field">
+                    <label for="set-max-sync-delta">Max Sync Delta (°)</label>
+                    <input id="set-max-sync-delta" type="number" min="0.1" max="90" step="0.1" />
+                </div>
+            </div>
+            <div class="settings-actions">
+                <button id="settings-save" class="btn-secondary">Save</button>
+                <span id="settings-msg" class="settings-msg"></span>
+            </div>
+        </details>
 
         <!-- Log stream -->
         <details id="log-section" open>

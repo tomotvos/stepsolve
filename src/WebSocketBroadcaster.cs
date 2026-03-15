@@ -70,6 +70,7 @@ public sealed class WebSocketBroadcaster
             solver = result.SolverName,
             solveTimeMs = result.SolveTime.TotalMilliseconds,
             timestamp = DateTimeOffset.UtcNow,
+            imageUrl = "/solve/image",
         });
 
     /// <summary>

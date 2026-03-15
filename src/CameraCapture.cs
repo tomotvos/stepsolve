@@ -85,15 +85,23 @@ public sealed class CameraCapture : ICameraCapture
 
     private string? GetMockImage()
     {
-        // Look for a test image in the images directory
-        var mockPath = Path.Combine(_outputDir, "test.jpg");
-        if (File.Exists(mockPath))
+        // Look for demo images bundled in wwwroot/demo/
+        var demoDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", "demo");
+        if (Directory.Exists(demoDir))
         {
-            _logger.LogDebug("Using mock image: {Path}", mockPath);
-            return mockPath;
+            var demoImages = Directory.GetFiles(demoDir, "*.jpg");
+            if (demoImages.Length > 0)
+            {
+                var pick = demoImages[Random.Shared.Next(demoImages.Length)];
+                // Copy to images dir so solve pipeline sees a fresh file each cycle
+                var outputPath = Path.Combine(_outputDir, "capture.jpg");
+                File.Copy(pick, outputPath, overwrite: true);
+                _logger.LogDebug("Using demo image: {Source} → {Path}", Path.GetFileName(pick), outputPath);
+                return outputPath;
+            }
         }
 
-        _logger.LogDebug("No mock image available at {Path}, skipping capture", mockPath);
+        _logger.LogDebug("No demo images available in {Dir}, skipping capture", demoDir);
         return null;
     }
 }

@@ -54,6 +54,7 @@ public class ApiEndpointTests
                     services.AddSingleton<ISolver, AstrometrySolver>();
                     services.AddSingleton<OnStepClient>();
                     services.AddSingleton<WebSocketBroadcaster>();
+                    services.AddSingleton<SettingsService>();
                 });
                 webBuilder.Configure(app =>
                 {
@@ -113,9 +114,22 @@ public class ApiEndpointTests
                             {
                                 var demoResult = new SolveResult(123.45, -67.89, null, null, 0.99, TimeSpan.FromMilliseconds(12), "demo");
                                 state.UpdateResult(demoResult);
-                                return Results.Ok(new { ra = demoResult.RaDeg, dec = demoResult.DecDeg, confidence = demoResult.Confidence, solver = demoResult.SolverName });
+                                return Results.Ok(new { ra = demoResult.RaDeg, dec = demoResult.DecDeg, confidence = demoResult.Confidence, solver = demoResult.SolverName, imageUrl = state.LastImagePath != null ? "/solve/image" : (string?)null });
                             }
                             return Results.BadRequest(new { error = "Provide an image file or use ?demo=1" });
+                        });
+
+                        endpoints.MapPost("/settings", async (HttpContext ctx, SettingsService settingsSvc) =>
+                        {
+                            var body = await ctx.Request.ReadFromJsonAsync<Dictionary<string, Dictionary<string, object>>>();
+                            if (body == null)
+                                return Results.BadRequest(new { error = "Expected JSON object with section keys" });
+
+                            var error = settingsSvc.ApplyAndPersist(body);
+                            if (error != null)
+                                return Results.BadRequest(new { error });
+
+                            return Results.Ok(new { updated = true });
                         });
 
                         endpoints.MapGet("/solve/image", (SolveState state) =>
@@ -330,6 +344,76 @@ public class ApiEndpointTests
 
             if (!OperatingSystem.IsLinux())
                 Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        }
+        finally
+        {
+            await host.StopAsync();
+            host.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task PostSettings_ValidSettings_ReturnsOk()
+    {
+        var host = CreateTestHost();
+        await host.StartAsync();
+        try
+        {
+            var client = host.GetTestServer().CreateClient();
+            var content = new StringContent(
+                "{\"Solver\":{\"Backend\":\"cedar\"}}",
+                Encoding.UTF8, "application/json");
+            var response = await client.PostAsync("/settings", content);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.True(json.GetProperty("updated").GetBoolean());
+        }
+        finally
+        {
+            await host.StopAsync();
+            host.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task PostSettings_InvalidBackend_ReturnsBadRequest()
+    {
+        var host = CreateTestHost();
+        await host.StartAsync();
+        try
+        {
+            var client = host.GetTestServer().CreateClient();
+            var content = new StringContent(
+                "{\"Solver\":{\"Backend\":\"invalid\"}}",
+                Encoding.UTF8, "application/json");
+            var response = await client.PostAsync("/settings", content);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.True(json.TryGetProperty("error", out _));
+        }
+        finally
+        {
+            await host.StopAsync();
+            host.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task PostSettings_NegativeShutter_ReturnsBadRequest()
+    {
+        var host = CreateTestHost();
+        await host.StartAsync();
+        try
+        {
+            var client = host.GetTestServer().CreateClient();
+            var content = new StringContent(
+                "{\"Camera\":{\"ShutterUs\":\"-100\"}}",
+                Encoding.UTF8, "application/json");
+            var response = await client.PostAsync("/settings", content);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
         finally
         {

@@ -307,13 +307,23 @@ WantedBy=multi-user.target
 - [ ] Day/night theme toggle
 - [ ] Log stream with pause/clear
 
-### Phase 6: Networking & Hotspot
+### Phase 6: Settings & Image Preview
+- [ ] Settings persistence — `POST /settings` writes changes to `appsettings.json` on disk so they survive restarts
+- [ ] Dashboard settings panel — expandable sections for Solver, Camera, and OnStep configuration with save button
+- [ ] Settings validation — reject invalid values (e.g. negative shutter, invalid backend name) before persisting
+- [ ] Image preview section on dashboard — display last captured/solved image via `/solve/image`
+- [ ] Image preview updates via WebSocket `solve` messages — dashboard fetches new image after each solve
+- [ ] Copy demo images from `skysolve_legacy/` into `wwwroot/demo/` for macOS mock captures
+- [ ] `CameraCapture` on macOS returns a random demo image instead of a blank mock frame
+- [ ] Image thumbnail in solve result display — visible confirmation that a real frame was captured
+
+### Phase 7: Networking & Hotspot
 - [ ] Carry forward autohotspot scripts from legacy (NetworkManager AP mode)
 - [ ] Verify mDNS/Avahi works in both AP mode (field) and client mode (home)
 - [ ] Service binds `0.0.0.0` — works regardless of network mode
 - [ ] Document hotspot setup and switching
 
-### Phase 7: Deployment & Polish
+### Phase 8: Deployment
 - [ ] Avahi/mDNS service files for `_http._tcp` and `_lx200._tcp`
 - [ ] Install script for Pi (binary + solver venv + systemd + avahi + hotspot)
 - [ ] Integration test with real hardware (Pi + camera + SkySafari + OnStepX)

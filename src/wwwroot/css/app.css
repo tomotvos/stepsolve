@@ -273,6 +273,118 @@ details summary {
 /* Stale indicator — shown when last solve > 5s ago */
 .stale .field span { opacity: 0.5; }
 
+/* Image preview */
+#image-container {
+    text-align: center;
+    min-height: 60px;
+}
+
+#preview-img {
+    max-width: 100%;
+    border-radius: 4px;
+    display: none;
+}
+
+#preview-img.visible {
+    display: block;
+}
+
+#no-image-msg {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    padding: 1rem 0;
+}
+
+#no-image-msg.hidden {
+    display: none;
+}
+
+/* Settings panel */
+.settings-group {
+    margin-bottom: 0.75rem;
+}
+
+.settings-group h3 {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.3rem;
+    padding-bottom: 0.2rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.setting-field {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.3rem 0;
+}
+
+.setting-field label {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+}
+
+.setting-field input,
+.setting-field select {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--accent-dim);
+    border-radius: 4px;
+    padding: 0.25rem 0.4rem;
+    font-size: 0.85rem;
+    width: 120px;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+}
+
+.setting-field input[type="checkbox"] {
+    width: auto;
+    min-width: 18px;
+    min-height: 18px;
+    cursor: pointer;
+}
+
+.setting-field input[type="text"] {
+    width: 140px;
+}
+
+.settings-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.btn-secondary {
+    background: var(--accent-dim);
+    color: var(--text);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 0.5rem 1.5rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    min-height: 36px;
+}
+
+.btn-secondary:hover {
+    opacity: 0.85;
+}
+
+.settings-msg {
+    font-size: 0.8rem;
+}
+
+.settings-msg.ok {
+    color: var(--badge-solved);
+}
+
+.settings-msg.err {
+    color: var(--badge-error);
+}
+
 /* Desktop split view */
 @media (min-width: 768px) {
     main {
@@ -282,11 +394,13 @@ details summary {
         gap: 0.75rem;
     }
 
-    #solve-display { grid-column: 1; }
-    #action-bar    { grid-column: 1; }
-    #onstep-display { grid-column: 1; }
-    #log-section   { grid-column: 2; grid-row: 1 / span 3; }
-    .connection-bar { grid-column: 1 / span 2; }
+    #solve-display  { grid-column: 1; }
+    #image-preview   { grid-column: 1; }
+    #action-bar      { grid-column: 1; }
+    #onstep-display  { grid-column: 1; }
+    #settings-section { grid-column: 1 / span 2; }
+    #log-section     { grid-column: 2; grid-row: 1 / span 4; }
+    .connection-bar  { grid-column: 1 / span 2; }
 
     #log-container {
         max-height: 500px;

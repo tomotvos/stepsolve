@@ -30,6 +30,22 @@
         solveDisplay: document.getElementById('solve-display'),
         wsIndicator: document.getElementById('ws-indicator'),
         wsLabel: document.getElementById('ws-label'),
+        previewImg: document.getElementById('preview-img'),
+        noImageMsg: document.getElementById('no-image-msg'),
+        // Settings elements
+        setBackend: document.getElementById('set-backend'),
+        setHintTimeout: document.getElementById('set-hint-timeout'),
+        setSolveRadius: document.getElementById('set-solve-radius'),
+        setShutter: document.getElementById('set-shutter'),
+        setGain: document.getElementById('set-gain'),
+        setWidth: document.getElementById('set-width'),
+        setHeight: document.getElementById('set-height'),
+        setOnstepEnabled: document.getElementById('set-onstep-enabled'),
+        setOnstepHost: document.getElementById('set-onstep-host'),
+        setOnstepPort: document.getElementById('set-onstep-port'),
+        setMaxSyncDelta: document.getElementById('set-max-sync-delta'),
+        settingsSave: document.getElementById('settings-save'),
+        settingsMsg: document.getElementById('settings-msg'),
     };
 
     var state = {
@@ -86,6 +102,22 @@
 
         state.lastSolveTimestamp = data.timestamp || data.lastSolveTimestamp || null;
         checkStale();
+
+        // Refresh image preview (cache-bust with timestamp)
+        refreshImagePreview();
+    }
+
+    function refreshImagePreview() {
+        var img = els.previewImg;
+        img.src = '/solve/image?t=' + Date.now();
+        img.onload = function () {
+            img.classList.add('visible');
+            els.noImageMsg.classList.add('hidden');
+        };
+        img.onerror = function () {
+            img.classList.remove('visible');
+            els.noImageMsg.classList.remove('hidden');
+        };
     }
 
     function updateStateBadge(st) {
@@ -302,10 +334,90 @@
             .finally(function () { els.solveNowBtn.disabled = false; });
     });
 
+    // -- Settings panel --
+
+    function loadSettings() {
+        fetch('/settings')
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (!data) return;
+                if (data.solver) {
+                    els.setBackend.value = data.solver.backend || 'astrometry';
+                    els.setHintTimeout.value = data.solver.hintTimeout || 10;
+                    els.setSolveRadius.value = data.solver.solveRadius || 20;
+                }
+                if (data.camera) {
+                    els.setShutter.value = data.camera.shutterUs || 1000000;
+                    els.setGain.value = data.camera.gain || 8;
+                    els.setWidth.value = data.camera.width || 1280;
+                    els.setHeight.value = data.camera.height || 960;
+                }
+                if (data.onstep) {
+                    els.setOnstepEnabled.checked = !!data.onstep.enabled;
+                    els.setOnstepHost.value = data.onstep.host || 'localhost';
+                    els.setOnstepPort.value = data.onstep.port || 9998;
+                    els.setMaxSyncDelta.value = data.onstep.maxSyncDeltaDeg || 5;
+                }
+            })
+            .catch(function () { /* ignore */ });
+    }
+
+    els.settingsSave.addEventListener('click', function () {
+        els.settingsMsg.textContent = '';
+        els.settingsMsg.className = 'settings-msg';
+
+        var payload = {
+            Solver: {
+                Backend: els.setBackend.value,
+                HintTimeout: els.setHintTimeout.value,
+                SolveRadius: els.setSolveRadius.value
+            },
+            Camera: {
+                ShutterUs: els.setShutter.value,
+                Gain: els.setGain.value,
+                Width: els.setWidth.value,
+                Height: els.setHeight.value
+            },
+            OnStep: {
+                Enabled: els.setOnstepEnabled.checked.toString(),
+                Host: els.setOnstepHost.value,
+                Port: els.setOnstepPort.value,
+                MaxSyncDeltaDeg: els.setMaxSyncDelta.value
+            }
+        };
+
+        fetch('/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+            .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+            .then(function (result) {
+                if (result.ok) {
+                    els.settingsMsg.textContent = 'Saved';
+                    els.settingsMsg.className = 'settings-msg ok';
+                } else {
+                    els.settingsMsg.textContent = result.data.error || 'Save failed';
+                    els.settingsMsg.className = 'settings-msg err';
+                }
+                setTimeout(function () { els.settingsMsg.textContent = ''; }, 3000);
+            })
+            .catch(function () {
+                els.settingsMsg.textContent = 'Network error';
+                els.settingsMsg.className = 'settings-msg err';
+            });
+    });
+
     // -- Init --
 
     // Initial status fetch
     pollStatus();
+
+    // Load settings panel values
+    loadSettings();
+
+    // Try initial image preview
+    refreshImagePreview();
 
     // Start WebSocket connection
     connectWebSocket();
