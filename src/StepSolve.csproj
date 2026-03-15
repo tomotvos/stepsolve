@@ -18,4 +18,8 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="StepSolve.Tests" />
+  </ItemGroup>
+
 </Project>

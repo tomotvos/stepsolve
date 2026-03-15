@@ -1,5 +1,5 @@
 using StepSolve;
-using Microsoft.AspNetCore.Http.Json;
+using StepSolve.Solvers;
 using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -12,6 +12,15 @@ builder.Services.Configure<OnStepOptions>(builder.Configuration.GetSection(OnSte
 
 // Shared state — singleton, thread-safe
 builder.Services.AddSingleton<SolveState>();
+
+// Camera capture
+builder.Services.AddSingleton<ICameraCapture, CameraCapture>();
+
+// Solver — currently only astrometry, will add Cedar/Tetra3 later
+builder.Services.AddSingleton<ISolver, AstrometrySolver>();
+
+// Background solve loop
+builder.Services.AddHostedService<StepSolveService>();
 
 // Configure Kestrel to listen on the configured web port
 builder.WebHost.ConfigureKestrel((context, options) =>
