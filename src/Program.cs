@@ -22,6 +22,9 @@ builder.Services.AddSingleton<ISolver, AstrometrySolver>();
 // OnStep client for mount sync
 builder.Services.AddSingleton<OnStepClient>();
 
+// WebSocket broadcaster for real-time dashboard updates
+builder.Services.AddSingleton<WebSocketBroadcaster>();
+
 // Background solve loop
 builder.Services.AddHostedService<StepSolveService>();
 
@@ -37,10 +40,11 @@ builder.WebHost.ConfigureKestrel((context, options) =>
 
 var app = builder.Build();
 
+app.UseWebSockets();
 app.UseStaticFiles();
 
 // GET /status — current solve state and configuration
-app.MapGet("/status", (SolveState state, IOptions<StepSolveOptions> opts, IOptions<OnStepOptions> onstepOpts) =>
+app.MapGet("/status", (SolveState state, IOptions<StepSolveOptions> opts, IOptions<OnStepOptions> onstepOpts, OnStepClient onstepClient) =>
 {
     var (result, timestamp, currentState) = state.Current;
     return Results.Ok(new
@@ -58,8 +62,33 @@ app.MapGet("/status", (SolveState state, IOptions<StepSolveOptions> opts, IOptio
             enabled = onstepOpts.Value.Enabled,
             host = onstepOpts.Value.Host,
             port = onstepOpts.Value.Port,
+            lastSyncTimestamp = onstepClient.LastSyncTime != default ? onstepClient.LastSyncTime : (DateTimeOffset?)null,
+            lastSyncResult = onstepClient.LastSyncResult,
         }
     });
+});
+
+// WebSocket endpoint — real-time solve/status/log stream
+app.Map("/ws", async (HttpContext ctx, WebSocketBroadcaster broadcaster) =>
+{
+    if (!ctx.WebSockets.IsWebSocketRequest)
+    {
+        ctx.Response.StatusCode = 400;
+        return;
+    }
+    var ws = await ctx.WebSockets.AcceptWebSocketAsync();
+    await broadcaster.HandleAsync(ws, ctx.RequestAborted);
+});
+
+// POST /mode — change operating mode (solve/demo/idle)
+app.MapPost("/mode", (HttpContext ctx, IConfiguration config) =>
+{
+    var mode = ctx.Request.Query["mode"].ToString().ToLowerInvariant();
+    if (mode is not ("solve" or "demo" or "idle"))
+        return Results.BadRequest(new { error = "Mode must be solve, demo, or idle" });
+
+    config["StepSolve:Mode"] = mode;
+    return Results.Ok(new { mode });
 });
 
 // GET / — serve the dashboard (falls through to static files wwwroot/index.html)

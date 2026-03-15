@@ -9,11 +9,20 @@
 <body>
     <header>
         <h1>StepSolve</h1>
-        <span id="mode-badge">--</span>
-        <button id="theme-toggle" aria-label="Toggle night mode">🌙</button>
+        <div class="header-controls">
+            <select id="mode-select" aria-label="Operating mode">
+                <option value="solve">Solve</option>
+                <option value="demo">Demo</option>
+                <option value="idle">Idle</option>
+            </select>
+            <span id="state-badge" class="badge">--</span>
+            <button id="theme-toggle" aria-label="Toggle night mode">🌙</button>
+        </div>
     </header>
     <main>
+        <!-- Solve result display -->
         <section id="solve-display">
+            <h2>Last Solve</h2>
             <div class="field"><label>RA</label><span id="ra">--</span></div>
             <div class="field"><label>Dec</label><span id="dec">--</span></div>
             <div class="field"><label>Confidence</label><span id="confidence">--</span></div>
@@ -21,9 +30,36 @@
             <div class="field"><label>Solve Time</label><span id="solve-time">--</span></div>
             <div class="field"><label>Last Solve</label><span id="last-solve-time">--</span></div>
         </section>
-        <section id="state-display">
-            <div class="field"><label>State</label><span id="state">--</span></div>
+
+        <!-- Solve Now button -->
+        <section id="action-bar">
+            <button id="solve-now-btn" class="btn-primary" disabled>Solve Now</button>
         </section>
+
+        <!-- OnStep status -->
+        <section id="onstep-display">
+            <h2>OnStep</h2>
+            <div class="field"><label>Status</label><span id="onstep-status">--</span></div>
+            <div class="field"><label>Last Sync</label><span id="onstep-last-sync">--</span></div>
+            <div class="field"><label>Result</label><span id="onstep-result">--</span></div>
+        </section>
+
+        <!-- Log stream -->
+        <details id="log-section" open>
+            <summary>Logs</summary>
+            <div class="log-controls">
+                <button id="log-pause" aria-label="Pause log stream">⏸</button>
+                <button id="log-clear" aria-label="Clear logs">🗑</button>
+                <span id="log-count">0 entries</span>
+            </div>
+            <div id="log-container" role="log" aria-live="polite" aria-label="Application logs"></div>
+        </details>
+
+        <!-- Connection indicator -->
+        <div id="connection-status" class="connection-bar">
+            <span id="ws-indicator" class="indicator disconnected"></span>
+            <span id="ws-label">Disconnected</span>
+        </div>
     </main>
     <script src="/js/app.js"></script>
 </body>

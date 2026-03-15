@@ -15,6 +15,7 @@ public sealed class StepSolveService : BackgroundService
     private readonly ISolver _solver;
     private readonly SolveState _state;
     private readonly OnStepClient _onstep;
+    private readonly WebSocketBroadcaster _ws;
     private readonly IOptionsMonitor<StepSolveOptions> _options;
     private readonly ILogger<StepSolveService> _logger;
 
@@ -27,6 +28,7 @@ public sealed class StepSolveService : BackgroundService
         ISolver solver,
         SolveState state,
         OnStepClient onstep,
+        WebSocketBroadcaster ws,
         IOptionsMonitor<StepSolveOptions> options,
         ILogger<StepSolveService> logger)
     {
@@ -34,6 +36,7 @@ public sealed class StepSolveService : BackgroundService
         _solver = solver;
         _state = state;
         _onstep = onstep;
+        _ws = ws;
         _options = options;
         _logger = logger;
     }
@@ -80,6 +83,7 @@ public sealed class StepSolveService : BackgroundService
     {
         // Capture
         _state.SetState("capturing");
+        _ = _ws.BroadcastStatus(_options.CurrentValue.Mode, "capturing", _onstep);
         var imagePath = await _camera.CaptureAsync(ct);
 
         if (imagePath == null)
@@ -91,6 +95,7 @@ public sealed class StepSolveService : BackgroundService
 
         // Solve
         _state.SetState("solving");
+        _ = _ws.BroadcastStatus(_options.CurrentValue.Mode, "solving", _onstep);
         var result = await _solver.SolveAsync(imagePath, hints: null, ct);
 
         if (result.IsValid)
@@ -101,12 +106,17 @@ public sealed class StepSolveService : BackgroundService
                 result.RaDeg, result.DecDeg, result.Confidence,
                 result.SolveTime.TotalSeconds, result.SolverName);
 
+            // Broadcast to WebSocket clients
+            _ = _ws.BroadcastSolve(result);
+            _ = _ws.BroadcastStatus(_options.CurrentValue.Mode, "solved", _onstep);
+
             // Sync to OnStep (fire-and-forget — does not block solve loop)
             _ = _onstep.SyncAsync(result, _state, ct);
         }
         else
         {
             _state.SetState("idle");
+            _ = _ws.BroadcastStatus(_options.CurrentValue.Mode, "idle", _onstep);
             _logger.LogDebug("Solve returned no result");
         }
     }
@@ -127,5 +137,7 @@ public sealed class StepSolveService : BackgroundService
         );
 
         _state.UpdateResult(result);
+        _ = _ws.BroadcastSolve(result);
+        _ = _ws.BroadcastStatus(_options.CurrentValue.Mode, "solved", _onstep);
     }
 }

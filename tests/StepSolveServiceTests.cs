@@ -55,8 +55,8 @@ public class StepSolveServiceTests
         var state = new SolveState();
         var camera = new StubCamera();
         var solver = new StubSolver();
-        var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), CreateOptions("demo"),
-            NullLogger<StepSolveService>.Instance);
+        var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
+            CreateOptions("demo"), NullLogger<StepSolveService>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
 
@@ -84,8 +84,8 @@ public class StepSolveServiceTests
         {
             ResultToReturn = new SolveResult(100, 50, null, null, 0.9, TimeSpan.FromSeconds(1), "test")
         };
-        var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), CreateOptions("solve"),
-            NullLogger<StepSolveService>.Instance);
+        var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
+            CreateOptions("solve"), NullLogger<StepSolveService>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
 
@@ -109,8 +109,8 @@ public class StepSolveServiceTests
         var state = new SolveState();
         var camera = new StubCamera { ImageToReturn = null };
         var solver = new StubSolver();
-        var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), CreateOptions("solve"),
-            NullLogger<StepSolveService>.Instance);
+        var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
+            CreateOptions("solve"), NullLogger<StepSolveService>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
 
@@ -128,8 +128,8 @@ public class StepSolveServiceTests
         var state = new SolveState();
         var camera = new StubCamera();
         var solver = new StubSolver();
-        var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), CreateOptions("idle"),
-            NullLogger<StepSolveService>.Instance);
+        var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
+            CreateOptions("idle"), NullLogger<StepSolveService>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
 
