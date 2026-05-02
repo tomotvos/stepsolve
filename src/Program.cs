@@ -28,8 +28,11 @@ builder.Services.AddSingleton<WebSocketBroadcaster>();
 // Settings service — validation and persistence to disk
 builder.Services.AddSingleton<SettingsService>();
 
-// Wire application logs to WebSocket for real-time dashboard log stream
+// Wire application logs to WebSocket for real-time dashboard log stream.
+// AddFilter ensures Debug messages from StepSolve.* reach this provider even
+// though the global minimum level in appsettings.json is Information.
 builder.Services.AddSingleton<ILoggerProvider, WebSocketLoggerProvider>();
+builder.Logging.AddFilter<WebSocketLoggerProvider>("StepSolve", LogLevel.Debug);
 
 // Background solve loop
 builder.Services.AddHostedService<StepSolveService>();
@@ -154,7 +157,7 @@ app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, 
             SolverName: "demo"
         );
         state.UpdateResult(demoResult);
-        _ = ws.BroadcastSolve(demoResult);
+        _ = ws.BroadcastSolve(demoResult, hasImage: false);
         return Results.Ok(new
         {
             ra = demoResult.RaDeg,
@@ -162,7 +165,7 @@ app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, 
             confidence = demoResult.Confidence,
             solver = demoResult.SolverName,
             solveTimeMs = demoResult.SolveTime.TotalMilliseconds,
-            imageUrl = state.LastImagePath != null ? "/solve/image" : (string?)null,
+            imageUrl = (string?)null,
         });
     }
 
@@ -184,7 +187,7 @@ app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, 
     if (result.IsValid)
     {
         state.UpdateResult(result, tempPath);
-        _ = ws.BroadcastSolve(result);
+        _ = ws.BroadcastSolve(result, hasImage: true);
         _ = ws.BroadcastStatus(opts.Value.Mode, "solved", onstep);
     }
 

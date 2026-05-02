@@ -103,8 +103,8 @@
         state.lastSolveTimestamp = data.timestamp || data.lastSolveTimestamp || null;
         checkStale();
 
-        // Refresh image preview (cache-bust with timestamp)
-        refreshImagePreview();
+        // Only refresh image preview when the server tells us one is available
+        if (data.imageUrl) refreshImagePreview();
     }
 
     function refreshImagePreview() {
@@ -415,9 +415,6 @@
 
     // Load settings panel values
     loadSettings();
-
-    // Try initial image preview
-    refreshImagePreview();
 
     // Start WebSocket connection
     connectWebSocket();

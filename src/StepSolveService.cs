@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -16,7 +17,7 @@ public sealed class StepSolveService : BackgroundService
     private readonly SolveState _state;
     private readonly OnStepClient _onstep;
     private readonly WebSocketBroadcaster _ws;
-    private readonly IOptionsMonitor<StepSolveOptions> _options;
+    private readonly IConfiguration _config;
     private readonly ILogger<StepSolveService> _logger;
 
     // Demo sweep state
@@ -29,7 +30,7 @@ public sealed class StepSolveService : BackgroundService
         SolveState state,
         OnStepClient onstep,
         WebSocketBroadcaster ws,
-        IOptionsMonitor<StepSolveOptions> options,
+        IConfiguration config,
         ILogger<StepSolveService> logger)
     {
         _camera = camera;
@@ -37,17 +38,17 @@ public sealed class StepSolveService : BackgroundService
         _state = state;
         _onstep = onstep;
         _ws = ws;
-        _options = options;
+        _config = config;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("StepSolve service starting, mode={Mode}", _options.CurrentValue.Mode);
+        _logger.LogInformation("StepSolve service starting, mode={Mode}", CurrentMode);
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            var mode = _options.CurrentValue.Mode.ToLowerInvariant();
+            var mode = CurrentMode;
 
             try
             {
@@ -83,7 +84,7 @@ public sealed class StepSolveService : BackgroundService
     {
         // Capture
         _state.SetState("capturing");
-        _ = _ws.BroadcastStatus(_options.CurrentValue.Mode, "capturing", _onstep);
+        _ = _ws.BroadcastStatus(CurrentMode, "capturing", _onstep);
         var imagePath = await _camera.CaptureAsync(ct);
 
         if (imagePath == null)
@@ -95,7 +96,7 @@ public sealed class StepSolveService : BackgroundService
 
         // Solve
         _state.SetState("solving");
-        _ = _ws.BroadcastStatus(_options.CurrentValue.Mode, "solving", _onstep);
+        _ = _ws.BroadcastStatus(CurrentMode, "solving", _onstep);
         var result = await _solver.SolveAsync(imagePath, hints: null, ct);
 
         if (result.IsValid)
@@ -107,8 +108,8 @@ public sealed class StepSolveService : BackgroundService
                 result.SolveTime.TotalSeconds, result.SolverName);
 
             // Broadcast to WebSocket clients
-            _ = _ws.BroadcastSolve(result);
-            _ = _ws.BroadcastStatus(_options.CurrentValue.Mode, "solved", _onstep);
+            _ = _ws.BroadcastSolve(result, hasImage: true);
+            _ = _ws.BroadcastStatus(CurrentMode, "solved", _onstep);
 
             // Sync to OnStep (fire-and-forget — does not block solve loop)
             _ = _onstep.SyncAsync(result, ct);
@@ -116,7 +117,7 @@ public sealed class StepSolveService : BackgroundService
         else
         {
             _state.SetState("idle");
-            _ = _ws.BroadcastStatus(_options.CurrentValue.Mode, "idle", _onstep);
+            _ = _ws.BroadcastStatus(CurrentMode, "idle", _onstep);
             _logger.LogDebug("Solve returned no result");
         }
     }
@@ -138,6 +139,10 @@ public sealed class StepSolveService : BackgroundService
 
         _state.UpdateResult(result);
         _ = _ws.BroadcastSolve(result);
-        _ = _ws.BroadcastStatus(_options.CurrentValue.Mode, "solved", _onstep);
+        _ = _ws.BroadcastStatus(CurrentMode, "solved", _onstep);
+        _logger.LogDebug("Demo: RA={Ra:F2}° Dec={Dec:F2}°", result.RaDeg, result.DecDeg);
     }
+
+    private string CurrentMode =>
+        (_config["StepSolve:Mode"] ?? "demo").ToLowerInvariant();
 }

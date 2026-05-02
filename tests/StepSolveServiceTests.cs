@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -38,9 +39,11 @@ public class StepSolveServiceTests
         }
     }
 
-    private static IOptionsMonitor<StepSolveOptions> CreateOptions(string mode = "solve")
+    private static IConfiguration CreateConfig(string mode = "solve")
     {
-        return new TestOptionsMonitor<StepSolveOptions>(new StepSolveOptions { Mode = mode });
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["StepSolve:Mode"] = mode })
+            .Build();
     }
 
     private static OnStepClient CreateOnStepClient()
@@ -56,7 +59,7 @@ public class StepSolveServiceTests
         var camera = new StubCamera();
         var solver = new StubSolver();
         var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
-            CreateOptions("demo"), NullLogger<StepSolveService>.Instance);
+            CreateConfig("demo"), NullLogger<StepSolveService>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
 
@@ -85,7 +88,7 @@ public class StepSolveServiceTests
             ResultToReturn = new SolveResult(100, 50, null, null, 0.9, TimeSpan.FromSeconds(1), "test")
         };
         var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
-            CreateOptions("solve"), NullLogger<StepSolveService>.Instance);
+            CreateConfig("solve"), NullLogger<StepSolveService>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
 
@@ -110,7 +113,7 @@ public class StepSolveServiceTests
         var camera = new StubCamera { ImageToReturn = null };
         var solver = new StubSolver();
         var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
-            CreateOptions("solve"), NullLogger<StepSolveService>.Instance);
+            CreateConfig("solve"), NullLogger<StepSolveService>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
 
@@ -129,7 +132,7 @@ public class StepSolveServiceTests
         var camera = new StubCamera();
         var solver = new StubSolver();
         var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
-            CreateOptions("idle"), NullLogger<StepSolveService>.Instance);
+            CreateConfig("idle"), NullLogger<StepSolveService>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
 

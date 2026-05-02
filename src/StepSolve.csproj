@@ -22,4 +22,8 @@
     <InternalsVisibleTo Include="StepSolve.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

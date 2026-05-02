@@ -90,7 +90,7 @@ public class WebSocketBroadcasterTests
             Assert.Equal(1, broadcaster.ClientCount);
 
             var result = new SolveResult(296.94, 42.69, 1.5, 2.1, 0.95, TimeSpan.FromMilliseconds(2340), "astrometry");
-            await broadcaster.BroadcastSolve(result);
+            await broadcaster.BroadcastSolve(result, hasImage: true);
 
             var buffer = new byte[4096];
             var recv = await ws.ReceiveAsync(buffer, CancellationToken.None);

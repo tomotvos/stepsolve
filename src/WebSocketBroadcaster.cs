@@ -60,7 +60,7 @@ public sealed class WebSocketBroadcaster
     /// <summary>
     /// Broadcast a solve result to all connected clients.
     /// </summary>
-    public Task BroadcastSolve(SolveResult result) =>
+    public Task BroadcastSolve(SolveResult result, bool hasImage = false) =>
         Broadcast(new
         {
             type = "solve",
@@ -70,7 +70,7 @@ public sealed class WebSocketBroadcaster
             solver = result.SolverName,
             solveTimeMs = result.SolveTime.TotalMilliseconds,
             timestamp = DateTimeOffset.UtcNow,
-            imageUrl = "/solve/image",
+            imageUrl = hasImage ? "/solve/image" : (string?)null,
         });
 
     /// <summary>

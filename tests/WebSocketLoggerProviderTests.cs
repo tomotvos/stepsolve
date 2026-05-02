@@ -28,14 +28,20 @@ public class WebSocketLoggerProviderTests
     {
         var broadcaster = new WebSocketBroadcaster();
         var provider = new WebSocketLoggerProvider(broadcaster);
-        var logger = provider.CreateLogger("Test");
 
-        Assert.True(logger.IsEnabled(LogLevel.Information));
-        Assert.True(logger.IsEnabled(LogLevel.Warning));
-        Assert.True(logger.IsEnabled(LogLevel.Error));
-        Assert.True(logger.IsEnabled(LogLevel.Critical));
-        Assert.False(logger.IsEnabled(LogLevel.Debug));
-        Assert.False(logger.IsEnabled(LogLevel.Trace));
+        // StepSolve categories pass Debug+
+        var appLogger = provider.CreateLogger("StepSolve.StepSolveService");
+        Assert.True(appLogger.IsEnabled(LogLevel.Debug));
+        Assert.True(appLogger.IsEnabled(LogLevel.Information));
+        Assert.True(appLogger.IsEnabled(LogLevel.Warning));
+        Assert.False(appLogger.IsEnabled(LogLevel.Trace));
+
+        // Framework categories only pass Warning+
+        var fwLogger = provider.CreateLogger("Microsoft.AspNetCore.Hosting");
+        Assert.False(fwLogger.IsEnabled(LogLevel.Debug));
+        Assert.False(fwLogger.IsEnabled(LogLevel.Information));
+        Assert.True(fwLogger.IsEnabled(LogLevel.Warning));
+        Assert.True(fwLogger.IsEnabled(LogLevel.Error));
     }
 
     [Fact]
