@@ -985,7 +985,7 @@ Tetra3 is pure Python and runs on any platform:
 
 ```bash
 python3 -m venv ~/.stepsolve-venv
-~/.stepsolve-dev-venv/bin/pip install "git+https://github.com/esa/tetra3.git" Pillow numpy
+~/.stepsolve-dev-venv/bin/pip install "git+https://github.com/esa/tetra3.git"
 ```
 
 Download a Tetra3 database from the [tetra3 GitHub releases](https://github.com/esa/tetra3/releases) (`tetra3_database.npz` or similar). Update `src/appsettings.json`:

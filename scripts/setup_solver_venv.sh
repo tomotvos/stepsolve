@@ -31,9 +31,7 @@ echo "==> Upgrading pip"
 echo "==> Installing Cedar and Tetra3 dependencies"
 "$VENV_DIR/bin/pip" install --quiet \
     cedar-detect \
-    "git+https://github.com/esa/tetra3.git" \
-    Pillow \
-    numpy
+    "git+https://github.com/esa/tetra3.git"
 
 echo "==> Copying solver scripts to $SOLVERS_DIR"
 cp "$SCRIPT_DIR/cedar_solve_service.py"  "$SOLVERS_DIR/"
