@@ -15,6 +15,7 @@ public abstract class PythonSolverBase : ISolver, IDisposable
     protected readonly ILogger _logger;
 
     private Process? _process;
+    private DateTimeOffset _nextRetryAfter = DateTimeOffset.MinValue;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private bool _disposed;
 
@@ -36,6 +37,8 @@ public abstract class PythonSolverBase : ISolver, IDisposable
 
     public async Task<SolveResult> SolveAsync(string imagePath, SolveHints? hints, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         if (!File.Exists(imagePath))
             throw new FileNotFoundException("Image not found", imagePath);
 
@@ -61,6 +64,12 @@ public abstract class PythonSolverBase : ISolver, IDisposable
         if (_process != null && !_process.HasExited)
             return _process;
 
+        if (DateTimeOffset.UtcNow < _nextRetryAfter)
+        {
+            _logger.LogDebug("{Solver} subprocess in backoff, skipping restart", _solverName);
+            return null;
+        }
+
         TerminateAndDispose(_process);
         _process = null;
 
@@ -73,6 +82,7 @@ public abstract class PythonSolverBase : ISolver, IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to launch {Solver} subprocess", _solverName);
+            _nextRetryAfter = DateTimeOffset.UtcNow.AddSeconds(10);
             return null;
         }
 
@@ -85,6 +95,7 @@ public abstract class PythonSolverBase : ISolver, IDisposable
             {
                 _logger.LogError("{Solver} subprocess unexpected startup output: {Line}", _solverName, line);
                 TerminateAndDispose(proc);
+                _nextRetryAfter = DateTimeOffset.UtcNow.AddSeconds(10);
                 return null;
             }
         }
@@ -97,6 +108,7 @@ public abstract class PythonSolverBase : ISolver, IDisposable
         {
             _logger.LogError(ex, "{Solver} subprocess failed to send ready signal", _solverName);
             TerminateAndDispose(proc);
+            _nextRetryAfter = DateTimeOffset.UtcNow.AddSeconds(10);
             return null;
         }
 

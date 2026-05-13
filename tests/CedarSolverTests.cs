@@ -245,7 +245,7 @@ public class CedarSolverTests : IDisposable
         using var solver = CreateSolver(python, stub, timeoutSec: 30);
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             solver.SolveAsync(_imagePath, null, cts.Token));
     }
 
