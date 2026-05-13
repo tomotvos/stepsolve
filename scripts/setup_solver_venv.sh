@@ -31,7 +31,7 @@ echo "==> Upgrading pip"
 echo "==> Installing Cedar and Tetra3 dependencies"
 "$VENV_DIR/bin/pip" install --quiet \
     cedar-detect \
-    tetra3 \
+    "git+https://github.com/esa/tetra3.git" \
     Pillow \
     numpy
 

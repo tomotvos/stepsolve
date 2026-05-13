@@ -864,7 +864,7 @@ WantedBy=multi-user.target
 3. Copy binary to `/usr/local/bin/stepsolve`
 4. Install systemd unit and enable it
 5. Install Avahi service files
-6. Create Python venv for solver wrappers (`pip install cedar-solve tetra3`)
+6. Create Python venv for solver wrappers (`pip install cedar-detect` and `pip install git+https://github.com/esa/tetra3.git`)
 7. Download index files (prompted, not automatic — different optics need different indexes)
 8. Start the service
 
@@ -985,7 +985,7 @@ Tetra3 is pure Python and runs on any platform:
 
 ```bash
 python3 -m venv ~/.stepsolve-venv
-~/.stepsolve-venv/bin/pip install tetra3 Pillow numpy
+~/.stepsolve-dev-venv/bin/pip install "git+https://github.com/esa/tetra3.git" Pillow numpy
 ```
 
 Download a Tetra3 database from the [tetra3 GitHub releases](https://github.com/esa/tetra3/releases) (`tetra3_database.npz` or similar). Update `src/appsettings.json`:
