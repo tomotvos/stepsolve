@@ -37,6 +37,7 @@ public sealed class CedarOptions
     public string PythonPath { get; set; } = "/var/lib/stepsolve/solvers/.venv/bin/python";
     public string ScriptPath { get; set; } = "/var/lib/stepsolve/solvers/cedar_solve_service.py";
     public string IndexPath { get; set; } = "/var/lib/stepsolve/indexes/cedar-default";
+    public int Timeout { get; set; } = 30;
 }
 
 public sealed class Tetra3Options
@@ -44,6 +45,7 @@ public sealed class Tetra3Options
     public string PythonPath { get; set; } = "/var/lib/stepsolve/solvers/.venv/bin/python";
     public string ScriptPath { get; set; } = "/var/lib/stepsolve/solvers/tetra3_solve_service.py";
     public string IndexPath { get; set; } = "/var/lib/stepsolve/indexes/tetra3-default";
+    public int Timeout { get; set; } = 30;
 }
 
 public sealed class CameraOptions

@@ -16,8 +16,9 @@ builder.Services.AddSingleton<SolveState>();
 // Camera capture
 builder.Services.AddSingleton<ICameraCapture, CameraCapture>();
 
-// Solver — currently only astrometry, will add Cedar/Tetra3 later
-builder.Services.AddSingleton<ISolver, AstrometrySolver>();
+// Solver — selected by Solver:Backend config (astrometry | cedar | tetra3)
+var backend = builder.Configuration.GetValue<string>("Solver:Backend") ?? "astrometry";
+SolverRegistration.Register(builder.Services, backend);
 
 // OnStep client for mount sync
 builder.Services.AddSingleton<OnStepClient>();
