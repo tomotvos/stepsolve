@@ -17,7 +17,15 @@ Usage: python3 tetra3_solve_service.py <database_path>
 
 import sys
 import json
+import math
 import time
+
+# numpy 2.0 removed numpy.math (it was always just an alias for the built-in
+# math module). Restore it before tetra3 imports numpy so the library works
+# on both numpy 1.x and 2.x.
+import numpy as np
+if not hasattr(np, 'math'):
+    np.math = math
 
 
 def main():
