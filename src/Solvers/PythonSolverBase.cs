@@ -12,6 +12,7 @@ public abstract class PythonSolverBase : ISolver, IDisposable
     private readonly string _indexPath;
     private readonly int _timeoutSec;
     private readonly string _solverName;
+    private readonly double? _fovEstimateDeg;
     protected readonly ILogger _logger;
 
     private Process? _process;
@@ -25,13 +26,15 @@ public abstract class PythonSolverBase : ISolver, IDisposable
         string indexPath,
         int timeoutSec,
         string solverName,
-        ILogger logger)
+        ILogger logger,
+        double? fovEstimateDeg = null)
     {
         _pythonPath = pythonPath;
         _scriptPath = scriptPath;
         _indexPath = indexPath;
         _timeoutSec = timeoutSec;
         _solverName = solverName;
+        _fovEstimateDeg = fovEstimateDeg;
         _logger = logger;
     }
 
@@ -147,7 +150,8 @@ public abstract class PythonSolverBase : ISolver, IDisposable
             imagePath,
             hints?.RaDeg,
             hints?.DecDeg,
-            hints?.RadiusDeg));
+            hints?.RadiusDeg,
+            _fovEstimateDeg));
 
         try
         {
@@ -234,7 +238,8 @@ public abstract class PythonSolverBase : ISolver, IDisposable
         [property: JsonPropertyName("image_path")] string ImagePath,
         [property: JsonPropertyName("ra_hint")] double? RaHint,
         [property: JsonPropertyName("dec_hint")] double? DecHint,
-        [property: JsonPropertyName("radius_deg")] double? RadiusDeg);
+        [property: JsonPropertyName("radius_deg")] double? RadiusDeg,
+        [property: JsonPropertyName("fov_estimate_deg")] double? FovEstimateDeg = null);
 
     private sealed record PipeResponse(
         [property: JsonPropertyName("ra_deg")] double RaDeg = 0,

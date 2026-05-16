@@ -33,7 +33,7 @@ public sealed class SettingsService
     public SettingsService(IConfiguration config)
     {
         _config = config;
-        _settingsPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+        _settingsPath = Path.Combine(AppContext.BaseDirectory, "appsettings.runtime.json");
     }
 
     // Constructor for testing — allows specifying the settings file path
@@ -82,6 +82,7 @@ public sealed class SettingsService
                     "StepSolve:WebPort" => ValidPort(value),
                     "StepSolve:Lx200Port" => ValidPort(value),
                     "Solver:Backend" => ValidBackends.Contains(value) ? null : "Backend must be astrometry, cedar, or tetra3",
+                    "Solver:FovEstimateDeg" => ValidPositiveDouble(value, "FovEstimateDeg"),
                     "Solver:HintTimeout" => ValidPositiveInt(value, "HintTimeout"),
                     "Solver:SolveRadius" => ValidPositiveDouble(value, "SolveRadius"),
                     "Camera:ShutterUs" => ValidPositiveInt(value, "ShutterUs"),

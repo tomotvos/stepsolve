@@ -4,6 +4,12 @@ using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Runtime settings file — highest priority, overrides appsettings.Development.json.
+// Written by SettingsService when the user saves from the dashboard.
+builder.Configuration.AddJsonFile(
+    Path.Combine(AppContext.BaseDirectory, "appsettings.runtime.json"),
+    optional: true, reloadOnChange: true);
+
 // Bind configuration sections
 builder.Services.Configure<StepSolveOptions>(builder.Configuration.GetSection(StepSolveOptions.Section));
 builder.Services.Configure<SolverOptions>(builder.Configuration.GetSection(SolverOptions.Section));
@@ -16,9 +22,8 @@ builder.Services.AddSingleton<SolveState>();
 // Camera capture
 builder.Services.AddSingleton<ICameraCapture, CameraCapture>();
 
-// Solver — selected by Solver:Backend config (astrometry | cedar | tetra3)
-var backend = builder.Configuration.GetValue<string>("Solver:Backend") ?? "astrometry";
-SolverRegistration.Register(builder.Services, backend);
+// Solver — routes to astrometry/cedar/tetra3 based on Solver:Backend at call time
+SolverRegistration.Register(builder.Services);
 
 // OnStep client for mount sync
 builder.Services.AddSingleton<OnStepClient>();

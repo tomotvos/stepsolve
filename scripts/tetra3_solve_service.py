@@ -63,7 +63,14 @@ def main():
                 raise RuntimeError("Pillow not installed; cannot open image")
 
             image = PILImage.open(image_path)
-            result = t3.solve_from_image(image)
+
+            solve_kwargs = {}
+            fov = req.get("fov_estimate_deg")
+            if fov:
+                solve_kwargs["fov_estimate"] = fov
+                solve_kwargs["fov_max_error"] = fov * 0.5
+
+            result = t3.solve_from_image(image, **solve_kwargs)
             elapsed_ms = (time.monotonic() - start) * 1000
 
             if result and result.get("RA") is not None:
@@ -74,12 +81,17 @@ def main():
                     "solve_time_ms": elapsed_ms,
                 }), flush=True)
             else:
+                try:
+                    diag = t3.get_centroids_from_image(image)
+                    n_centroids = len(diag)
+                except Exception:
+                    n_centroids = "error"
                 print(json.dumps({
                     "ra_deg": 0.0,
                     "dec_deg": 0.0,
                     "confidence": 0.0,
                     "solve_time_ms": elapsed_ms,
-                    "error": "no solution",
+                    "error": f"no solution (centroids={n_centroids})",
                 }), flush=True)
 
         except Exception as e:

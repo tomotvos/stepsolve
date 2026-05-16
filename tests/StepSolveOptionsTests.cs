@@ -28,7 +28,7 @@ public class StepSolveOptionsTests
     {
         var opts = new AstrometryOptions();
         Assert.Equal("solve-field", opts.SolveFieldPath);
-        Assert.Equal("/usr/share/astrometry", opts.IndexPath);
+        Assert.Equal("", opts.IndexPath);
         Assert.Equal(60, opts.Timeout);
         Assert.Equal(5, opts.Sigma);
         Assert.Equal(20, opts.Depth);

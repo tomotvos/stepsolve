@@ -12,7 +12,8 @@ public sealed class Tetra3Solver : PythonSolverBase
             options.CurrentValue.Tetra3.IndexPath,
             options.CurrentValue.Tetra3.Timeout,
             "tetra3",
-            logger)
+            logger,
+            options.CurrentValue.FovEstimateDeg > 0 ? options.CurrentValue.FovEstimateDeg : null)
     {
     }
 }

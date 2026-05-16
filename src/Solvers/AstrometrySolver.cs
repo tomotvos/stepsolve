@@ -84,7 +84,8 @@ public sealed partial class AstrometrySolver : ISolver
         Stopwatch sw,
         CancellationToken ct)
     {
-        var args = BuildArgs(inputPath, opts, hints, keepXyPath);
+        var fov = _options.CurrentValue.FovEstimateDeg > 0 ? _options.CurrentValue.FovEstimateDeg : (double?)null;
+        var args = BuildArgs(inputPath, opts, hints, keepXyPath, fov);
         _logger.LogDebug("Running: {Cmd} {Args}", opts.SolveFieldPath, args);
 
         try
@@ -105,12 +106,16 @@ public sealed partial class AstrometrySolver : ISolver
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(opts.Timeout));
 
-            var stdout = await process.StandardOutput.ReadToEndAsync(cts.Token);
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(cts.Token);
+            var stderrTask = process.StandardError.ReadToEndAsync(cts.Token);
             await process.WaitForExitAsync(cts.Token);
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
 
             if (process.ExitCode != 0)
             {
-                _logger.LogWarning("solve-field exited with code {Code}", process.ExitCode);
+                _logger.LogWarning("solve-field exited with code {Code}: {Stderr}",
+                    process.ExitCode, stderr.Trim());
                 return new SolveResult(0, 0, null, null, 0, sw.Elapsed, "astrometry");
             }
 
@@ -128,7 +133,7 @@ public sealed partial class AstrometrySolver : ISolver
         }
     }
 
-    internal static string BuildArgs(string inputPath, AstrometryOptions opts, SolveHints? hints, string? keepXyPath)
+    internal static string BuildArgs(string inputPath, AstrometryOptions opts, SolveHints? hints, string? keepXyPath, double? fovEstimateDeg = null)
     {
         var parts = new List<string>
         {
@@ -138,13 +143,22 @@ public sealed partial class AstrometrySolver : ISolver
             "--new-fits", "none",
             "--sigma", opts.Sigma.ToString(),
             "--depth", opts.Depth.ToString(),
-            "--index-dir", opts.IndexPath,
             "--uniformize", "0",
             "--no-remove-lines",
             "--match", "none",
             "--corr", "none",
             "--rdls", "none",
         };
+
+        if (!string.IsNullOrEmpty(opts.IndexPath))
+            parts.AddRange(["--index-dir", opts.IndexPath]);
+
+        if (fovEstimateDeg.HasValue)
+        {
+            var low = (fovEstimateDeg.Value * 0.5).ToString("F2");
+            var high = (fovEstimateDeg.Value * 1.5).ToString("F2");
+            parts.AddRange(["--scale-low", low, "--scale-high", high, "--scale-units", "degwidth"]);
+        }
 
         if (hints != null)
         {
@@ -154,9 +168,7 @@ public sealed partial class AstrometrySolver : ISolver
         }
 
         if (keepXyPath != null)
-        {
             parts.AddRange(["--keep-xylist", keepXyPath]);
-        }
 
         return string.Join(" ", parts);
     }

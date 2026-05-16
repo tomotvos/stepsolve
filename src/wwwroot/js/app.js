@@ -34,6 +34,7 @@
         noImageMsg: document.getElementById('no-image-msg'),
         // Settings elements
         setBackend: document.getElementById('set-backend'),
+        setFovEstimate: document.getElementById('set-fov-estimate'),
         setHintTimeout: document.getElementById('set-hint-timeout'),
         setSolveRadius: document.getElementById('set-solve-radius'),
         setShutter: document.getElementById('set-shutter'),
@@ -343,6 +344,7 @@
                 if (!data) return;
                 if (data.solver) {
                     els.setBackend.value = data.solver.backend || 'astrometry';
+                    els.setFovEstimate.value = data.solver.fovEstimateDeg || 34.3;
                     els.setHintTimeout.value = data.solver.hintTimeout || 10;
                     els.setSolveRadius.value = data.solver.solveRadius || 20;
                 }
@@ -369,6 +371,7 @@
         var payload = {
             Solver: {
                 Backend: els.setBackend.value,
+                FovEstimateDeg: els.setFovEstimate.value,
                 HintTimeout: els.setHintTimeout.value,
                 SolveRadius: els.setSolveRadius.value
             },

@@ -16,6 +16,7 @@ public sealed class SolverOptions
     public string Backend { get; set; } = "astrometry";
     public int HintTimeout { get; set; } = 10;
     public double SolveRadius { get; set; } = 20.0;
+    public double FovEstimateDeg { get; set; } = 34.3;
     public bool EnableFallback { get; set; } = true;
 
     public AstrometryOptions Astrometry { get; set; } = new();
@@ -26,7 +27,7 @@ public sealed class SolverOptions
 public sealed class AstrometryOptions
 {
     public string SolveFieldPath { get; set; } = "solve-field";
-    public string IndexPath { get; set; } = "/usr/share/astrometry";
+    public string IndexPath { get; set; } = "";
     public int Timeout { get; set; } = 60;
     public int Sigma { get; set; } = 5;
     public int Depth { get; set; } = 20;
