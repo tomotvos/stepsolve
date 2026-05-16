@@ -16,6 +16,7 @@ public sealed class SolverOptions
     public string Backend { get; set; } = "astrometry";
     public int HintTimeout { get; set; } = 10;
     public double SolveRadius { get; set; } = 20.0;
+    public double FovEstimateDeg { get; set; } = 34.3;
     public bool EnableFallback { get; set; } = true;
 
     public AstrometryOptions Astrometry { get; set; } = new();
@@ -26,7 +27,7 @@ public sealed class SolverOptions
 public sealed class AstrometryOptions
 {
     public string SolveFieldPath { get; set; } = "solve-field";
-    public string IndexPath { get; set; } = "/usr/share/astrometry";
+    public string IndexPath { get; set; } = "";
     public int Timeout { get; set; } = 60;
     public int Sigma { get; set; } = 5;
     public int Depth { get; set; } = 20;
@@ -37,6 +38,7 @@ public sealed class CedarOptions
     public string PythonPath { get; set; } = "/var/lib/stepsolve/solvers/.venv/bin/python";
     public string ScriptPath { get; set; } = "/var/lib/stepsolve/solvers/cedar_solve_service.py";
     public string IndexPath { get; set; } = "/var/lib/stepsolve/indexes/cedar-default";
+    public int Timeout { get; set; } = 30;
 }
 
 public sealed class Tetra3Options
@@ -44,6 +46,7 @@ public sealed class Tetra3Options
     public string PythonPath { get; set; } = "/var/lib/stepsolve/solvers/.venv/bin/python";
     public string ScriptPath { get; set; } = "/var/lib/stepsolve/solvers/tetra3_solve_service.py";
     public string IndexPath { get; set; } = "/var/lib/stepsolve/indexes/tetra3-default";
+    public int Timeout { get; set; } = 30;
 }
 
 public sealed class CameraOptions

@@ -15,9 +15,22 @@ public class AstrometrySolverTests
         Assert.Contains("--no-plots", args);
         Assert.Contains("--sigma 5", args);
         Assert.Contains("--depth 20", args);
-        Assert.Contains("--index-dir /usr/share/astrometry", args);
+        Assert.Contains("--uniformize 0", args);
+        Assert.Contains("--no-remove-lines", args);
+        Assert.Contains("--match none", args);
+        Assert.DoesNotContain("--index-dir", args);
         Assert.DoesNotContain("--ra", args);
         Assert.DoesNotContain("--dec", args);
+    }
+
+    [Fact]
+    public void BuildArgs_WithCustomSigmaAndDepth()
+    {
+        var opts = new AstrometryOptions { Sigma = 10, Depth = 40 };
+        var args = AstrometrySolver.BuildArgs("/tmp/test.jpg", opts, hints: null, keepXyPath: null);
+
+        Assert.Contains("--sigma 10", args);
+        Assert.Contains("--depth 40", args);
     }
 
     [Fact]
@@ -42,13 +55,12 @@ public class AstrometrySolverTests
     }
 
     [Fact]
-    public void BuildArgs_WithCustomSigmaAndDepth()
+    public void BuildArgs_EmptyIndexPath_OmitsFlag()
     {
-        var opts = new AstrometryOptions { Sigma = 10, Depth = 40 };
+        var opts = new AstrometryOptions { IndexPath = "" };
         var args = AstrometrySolver.BuildArgs("/tmp/test.jpg", opts, hints: null, keepXyPath: null);
 
-        Assert.Contains("--sigma 10", args);
-        Assert.Contains("--depth 40", args);
+        Assert.DoesNotContain("--index-dir", args);
     }
 
     [Fact]
@@ -58,6 +70,27 @@ public class AstrometrySolverTests
         var args = AstrometrySolver.BuildArgs("/tmp/test.jpg", opts, hints: null, keepXyPath: null);
 
         Assert.Contains("--index-dir /opt/astrometry/indexes", args);
+    }
+
+    [Fact]
+    public void BuildArgs_WithFovEstimate_AddsScaleFlags()
+    {
+        var opts = new AstrometryOptions();
+        var args = AstrometrySolver.BuildArgs("/tmp/test.jpg", opts, hints: null, keepXyPath: null, fovEstimateDeg: 27.7);
+
+        Assert.Contains("--scale-low 13.85", args);
+        Assert.Contains("--scale-high 41.55", args);
+        Assert.Contains("--scale-units degwidth", args);
+    }
+
+    [Fact]
+    public void BuildArgs_NoFovEstimate_OmitsScaleFlags()
+    {
+        var opts = new AstrometryOptions();
+        var args = AstrometrySolver.BuildArgs("/tmp/test.jpg", opts, hints: null, keepXyPath: null, fovEstimateDeg: null);
+
+        Assert.DoesNotContain("--scale-low", args);
+        Assert.DoesNotContain("--scale-high", args);
     }
 
     [Fact]

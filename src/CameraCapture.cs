@@ -93,9 +93,17 @@ public sealed class CameraCapture : ICameraCapture
             if (demoImages.Length > 0)
             {
                 var pick = demoImages[Random.Shared.Next(demoImages.Length)];
-                // Copy to images dir so solve pipeline sees a fresh file each cycle
                 var outputPath = Path.Combine(_outputDir, "capture.jpg");
                 File.Copy(pick, outputPath, overwrite: true);
+
+                // Remove stale solver artifacts — they belong to a different image and
+                // will mislead the XY-fallback phase of the next solve.
+                foreach (var artifact in Directory.GetFiles(_outputDir, "capture.*")
+                    .Where(f => !f.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)))
+                {
+                    try { File.Delete(artifact); } catch { }
+                }
+
                 _logger.LogDebug("Using demo image: {Source} → {Path}", Path.GetFileName(pick), outputPath);
                 return outputPath;
             }

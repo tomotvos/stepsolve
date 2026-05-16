@@ -48,7 +48,7 @@ StepSolve replaces SkySolve Next, a Python/FastAPI application with these issues
 
 ### Technology choice
 
-- **.NET 9** with Native AOT compilation → single ~15 MB self-contained `linux-arm64` binary
+- **.NET 10** with Native AOT compilation → single ~15 MB self-contained `linux-arm64` binary (self-contained non-AOT is ~80 MB)
 - No Python runtime required for core functionality
 - Python only used for Cedar/Tetra3 solver wrappers (long-running pipe processes in an isolated venv)
 - No frontend build toolchain — static HTML/JS/CSS served by Kestrel
@@ -138,10 +138,11 @@ One process. One binary. One systemd unit. All components share in-memory state 
 | `Lx200Server.cs` | TCP listener for SkySafari on port 5002. Thread-per-client. |
 | `OnStepClient.cs` | TCP client to OnStepX on port 9998. Sync RA/Dec after solve. |
 | `ISolver.cs` | Interface: `Task<SolveResult> SolveAsync(string imagePath, SolveHints? hints)` |
+| `SolverRouter.cs` | `ISolver` implementation that dispatches to the configured backend at call time |
 | `AstrometrySolver.cs` | Shells out to `solve-field`, parses stdout |
 | `CedarSolver.cs` | Manages long-running `cedar_solve_service.py` via stdin/stdout pipe |
 | `Tetra3Solver.cs` | Same pipe pattern for `tetra3_solve_service.py` |
-| `CameraCapture.cs` | Shells out to `rpicam-still` (mock on macOS) |
+| `CameraCapture.cs` | Shells out to `rpicam-still` (mock on macOS: picks a random demo image) |
 | `StepSolveOptions.cs` | Strongly-typed config bound from `appsettings.json` |
 | `SolveResult.cs` | Record struct for solve output |
 | `SolveState.cs` | Thread-safe shared state: latest RA/Dec, confidence, timestamp |
@@ -424,60 +425,123 @@ Cedar-solve is a Python package with no CLI. StepSolve runs it as a **long-runni
 
 #### Architecture
 
-1. At service startup, StepSolve spawns `python cedar_solve_service.py` once
-2. Python process loads cedar-solve and its star database into memory (one-time cost, ~2s)
-3. Per solve: StepSolve writes a JSON request to stdin, reads a JSON response from stdout
-4. Per-solve overhead: ~1-2ms (vs ~210ms for spawning a new process each time)
-5. Cedar's own solve time: ~10ms → total ~12ms per solve
+1. At service startup, StepSolve spawns `python cedar_solve_service.py <index_path>` once
+2. Python process loads the Cedar star database into memory (one-time cost, ~2s)
+3. Python prints `{"ready": true}` to signal it is ready to accept requests
+4. Per solve: StepSolve writes a JSON request line to stdin, reads a JSON response line from stdout
+5. Per-solve overhead: ~1–2ms (vs ~210ms for spawning a new process each time)
+6. Cedar's own solve time: ~10ms → total ~12ms per solve
+
+#### Subprocess lifecycle
+
+- **Startup timeout:** 30s to receive the ready signal before the process is killed
+- **Crash recovery:** If the subprocess exits unexpectedly, the next `SolveAsync` call detects `HasExited` and restarts it automatically
+- **Solve timeout:** Configurable via `Cedar:Timeout` (default 30s); on timeout the process is killed so it restarts clean
+- **Cancellation:** If the solve is cancelled by the caller (e.g., service shutdown), the process is killed and `OperationCanceledException` propagates
 
 #### Pipe protocol
 
-Request (StepSolve → Python, one JSON object per line):
+**Startup (Python → StepSolve, once on startup):**
 ```json
-{"image_path": "/var/lib/stepsolve/images/capture.jpg", "index_path": "/var/lib/stepsolve/indexes/cedar-default"}
+{"ready": true}
 ```
-
-Response (Python → StepSolve, one JSON object per line):
+Or on fatal error (catalog not found, import failure):
 ```json
-{"ra_deg": 296.94, "dec_deg": 42.69, "roll_deg": 12.3, "confidence": 0.98, "solve_time_ms": 10}
+{"ready": false, "error": "cedar_detect not installed: ..."}
 ```
 
-Error response:
+**Request (StepSolve → Python, one JSON line per solve):**
 ```json
-{"error": "Failed to solve: no matching stars"}
+{"image_path": "/var/lib/stepsolve/images/capture.jpg", "ra_hint": 296.94, "dec_hint": 42.69, "radius_deg": 20.0}
+```
+`ra_hint`, `dec_hint`, and `radius_deg` are `null` when no positional hint is available.
+
+**Response (Python → StepSolve, one JSON line per solve):**
+```json
+{"ra_deg": 296.94, "dec_deg": 42.69, "confidence": 0.98, "solve_time_ms": 10.5}
 ```
 
-#### Wrapper script (`cedar_solve_service.py`, ~50 lines)
-
-```python
-# Reads JSON from stdin line-by-line
-# Loads cedar-solve database once on startup
-# For each request: solve image, write JSON result to stdout
-# Never exits unless stdin closes or fatal error
+**Error response (no solution or exception in Python):**
+```json
+{"ra_deg": 0.0, "dec_deg": 0.0, "confidence": 0.0, "solve_time_ms": 1.0, "error": "no solution"}
 ```
+
+#### Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `Cedar:PythonPath` | `/var/lib/stepsolve/solvers/.venv/bin/python` | Python interpreter in the solver venv |
+| `Cedar:ScriptPath` | `/var/lib/stepsolve/solvers/cedar_solve_service.py` | Path to the wrapper script |
+| `Cedar:IndexPath` | `/var/lib/stepsolve/indexes/cedar-default` | Cedar star database directory |
+| `Cedar:Timeout` | `30` | Per-solve timeout in seconds |
 
 ### 6.4 Tetra3 (`Tetra3Solver`)
 
-Same long-running pipe pattern as Cedar. Wrapper script `tetra3_solve_service.py` loads tetra3 database once, reads JSON requests, writes JSON responses.
+Same long-running pipe pattern as Cedar. `tetra3_solve_service.py` loads the Tetra3 database once at startup using `tetra3.Tetra3(database_path)`, then processes requests via `t3.solve_from_image(PIL.Image)`.
 
-### 6.5 Solver selection & fallback
+#### Pipe protocol (differs from Cedar)
 
-Configured in `appsettings.json`:
+**Request** (StepSolve → Python):
+```json
+{"image_path": "...", "ra_hint": null, "dec_hint": null, "radius_deg": null, "fov_estimate_deg": 34.3}
+```
+`fov_estimate_deg` is omitted (or zero) when `Solver:FovEstimateDeg` is not configured.
+
+**Success response** (Python → StepSolve):
+```json
+{"ra_deg": 296.94, "dec_deg": 42.69, "confidence": 1.0, "solve_time_ms": 125.0, "sigma_used": 5, "attempts": 2}
+```
+
+**Failure response:**
+```json
+{"ra_deg": 0.0, "dec_deg": 0.0, "confidence": 0.0, "solve_time_ms": 95.0, "sigma_used": 6, "attempts": 3, "error": "no solution (centroids=47)"}
+```
+
+`sigma_used` and `attempts` are logged at debug level on success when `attempts > 1`, and included in the warning on failure.
+
+#### Adaptive sigma retry
+
+Star detection threshold (`sigma`) is the primary knob for handling noisy images (obstructions, foliage, power lines). The service starts at `sigma=3` (biased towards clean images) and adjusts on failure based on the centroid count at that sigma:
+
+| Centroid count at σ=3 | Action |
+|-----------------------|--------|
+| < 10 | Retry at σ=2 (very sparse/dark image) |
+| 10–100 | Give up (sigma is unlikely to help) |
+| > 100 | Retry at σ=5, then σ=6 (noisy image) |
+
+This means noisy images typically require 2–3 solve attempts (~150–400 ms total); clean images solve on the first attempt (~50 ms).
+
+#### FOV hint
+
+`Solver:FovEstimateDeg` is a global hardware setting — set once to the diagonal field of view of your camera+lens combination. When set, it narrows Tetra3's pattern search, improving reliability and speed. `fov_max_error` is fixed at **8°** (absolute, not a fraction), which provides enough window for Tetra3's internal scale definition to differ slightly from the configured diagonal FOV.
+
+**Important:** Tetra3's solve quality degrades significantly on noisy images when no FOV hint is provided, because the unconstrained search space is too large to reliably match patterns against a noisy centroid field. The bundled demo images were captured with different hardware and have varying FOVs — two of the four may not solve reliably in demo mode without a matching FOV setting. This is a demo-only limitation; in production, `FovEstimateDeg` is configured for the actual hardware and all captured images are consistent.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `Tetra3:PythonPath` | `/var/lib/stepsolve/solvers/.venv/bin/python` | Python interpreter in the solver venv |
+| `Tetra3:ScriptPath` | `/var/lib/stepsolve/solvers/tetra3_solve_service.py` | Path to the wrapper script |
+| `Tetra3:IndexPath` | `/var/lib/stepsolve/indexes/tetra3-default` | Tetra3 database file path (without `.npz`) |
+| `Tetra3:Timeout` | `30` | Per-solve timeout in seconds |
+| `Solver:FovEstimateDeg` | `0` (no hint) | Diagonal FOV of the camera+lens in degrees |
+
+### 6.5 Solver selection
+
+Set `Solver:Backend` in `appsettings.json` to select the active solver:
 
 ```json
 {
   "Solver": {
-    "Backend": "astrometry",
-    "Astrometry": { ... },
-    "Cedar": { ... },
-    "Tetra3": { ... }
+    "Backend": "astrometry"
   }
 }
 ```
 
-- The configured `Backend` is the primary solver
-- If the primary fails, no automatic fallback to a different backend (fallback is Phase 1 → Phase 2 within Astrometry only)
-- Backend can be changed at runtime via settings API or config hot-reload
+Valid values: `astrometry`, `cedar`, `tetra3` (case-insensitive).
+
+All three backends are registered at startup. `SolverRouter` (the registered `ISolver`) reads `Solver:Backend` via `IOptionsMonitor` at each call, so switching backends via `POST /settings` takes effect on the **next solve cycle without a restart**. Unknown backend values are caught at solve time and logged as errors (the service starts regardless).
+
+If the active solver fails (e.g., no solution found), there is **no automatic fallback to a different backend**. The within-Astrometry Phase 1 → Phase 2 XY-file fallback is the only cross-attempt fallback.
 
 ### 6.6 Index management
 
@@ -569,6 +633,7 @@ After each capture, the image (or a downscaled version) is available at `GET /so
   },
   "Solver": {
     "Backend": "astrometry",
+    "FovEstimateDeg": 34.3,
     "HintTimeout": 10,
     "SolveRadius": 20.0,
     "EnableFallback": true,
@@ -582,12 +647,14 @@ After each capture, the image (or a downscaled version) is available at `GET /so
     "Cedar": {
       "PythonPath": "/var/lib/stepsolve/solvers/.venv/bin/python",
       "ScriptPath": "/var/lib/stepsolve/solvers/cedar_solve_service.py",
-      "IndexPath": "/var/lib/stepsolve/indexes/cedar-default"
+      "IndexPath": "/var/lib/stepsolve/indexes/cedar-default",
+      "Timeout": 30
     },
     "Tetra3": {
       "PythonPath": "/var/lib/stepsolve/solvers/.venv/bin/python",
       "ScriptPath": "/var/lib/stepsolve/solvers/tetra3_solve_service.py",
-      "IndexPath": "/var/lib/stepsolve/indexes/tetra3-default"
+      "IndexPath": "/var/lib/stepsolve/indexes/tetra3-default",
+      "Timeout": 30
     }
   },
   "Camera": {
@@ -772,15 +839,15 @@ wwwroot/
 ### 10.1 Build (on Mac)
 
 ```bash
-dotnet publish -c Release -r linux-arm64 --self-contained -p:PublishAot=true
+dotnet publish src -c Release -r linux-arm64 --self-contained
 ```
 
-Produces a single ~15 MB binary at `bin/Release/net9.0/linux-arm64/publish/stepsolve`.
+Produces a self-contained binary at `src/bin/Release/net10.0/linux-arm64/publish/stepsolve` (~80 MB self-contained; AOT build requires a `linux-arm64` linker, see Epic #5).
 
 ### 10.2 Deploy (to Pi)
 
 ```bash
-scp bin/Release/net9.0/linux-arm64/publish/stepsolve pi@stepsolve.local:/usr/local/bin/
+rsync -az src/bin/Release/net10.0/linux-arm64/publish/ pi@stepsolve.local:/usr/local/lib/stepsolve/
 ssh pi@stepsolve.local "sudo systemctl restart stepsolve"
 ```
 
@@ -836,7 +903,7 @@ WantedBy=multi-user.target
 3. Copy binary to `/usr/local/bin/stepsolve`
 4. Install systemd unit and enable it
 5. Install Avahi service files
-6. Create Python venv for solver wrappers (`pip install cedar-solve tetra3`)
+6. Create Python venv for solver wrappers (`pip install cedar-detect` and `pip install git+https://github.com/esa/tetra3.git`)
 7. Download index files (prompted, not automatic — different optics need different indexes)
 8. Start the service
 
@@ -864,8 +931,8 @@ WantedBy=multi-user.target
 
 ### 11.1 Prerequisites
 
-- .NET 9 SDK (installed: 9.0.305)
-- No Pi hardware, camera, or solve-field needed for basic development
+- .NET 10 SDK
+- No Pi hardware, camera, or `solve-field` needed for basic development and all unit tests
 
 ### 11.2 Build & Run
 
@@ -873,56 +940,157 @@ WantedBy=multi-user.target
 # Build
 dotnet build
 
-# Run (development mode)
-dotnet run
+# Run in demo mode (no hardware needed)
+dotnet run --project src
 
-# Run with specific settings
-dotnet run -- --urls "http://localhost:5001"
+# Run with environment overrides
+Solver__Backend=cedar dotnet run --project src
 ```
 
 The application detects macOS and:
-- Skips `rpicam-still` (uses mock capture or demo mode)
-- Skips `solve-field` if not installed (demo mode works without it)
-- Astrometry.net can be installed on Mac for integration testing: `brew install astrometry-net`
-- LX200 server starts and can be tested with any TCP client (`nc localhost 5002`)
+- Skips `rpicam-still` (no camera capture; demo mode or manual upload works)
+- LX200 server starts on port 5002 and can be tested with `nc localhost 5002`
 
-### 11.3 Testing
+### 11.3 Testing each solver backend on Mac
+
+#### All backends — unit tests (no hardware required)
 
 ```bash
-# Run all tests
 dotnet test
-
-# Run with coverage
-dotnet test --collect:"XPlat Code Coverage"
 ```
 
-#### Test strategy
+The 26 Cedar/Tetra3 solver tests run stub Python scripts (`python3` must be on `PATH`). They exercise the full pipe protocol, crash recovery, timeout, and cancellation without needing the real solver libraries or any star catalog.
 
-| Layer | What to test | How |
-|-------|-------------|-----|
-| Solvers | Command construction, output parsing, hint logic | Unit tests with captured solve-field output |
-| LX200 | Command parsing, response formatting, batched input | Unit tests with simulated TCP streams |
-| OnStep | Command construction, safety threshold, retry logic | Unit tests with mock TCP |
-| API | Endpoint responses, settings persistence | Integration tests with `WebApplicationFactory<T>` |
-| WebSocket | Message format, client connection lifecycle | Integration tests |
-| Config | Option binding, hot-reload, environment overrides | Unit tests |
-| End-to-end | Demo mode full cycle | Integration test: start host → verify LX200 responses |
+#### Astrometry.net
 
-#### Testing LX200 with SkySafari
+Install via Homebrew, then download a small index file set:
 
-On Mac, point SkySafari (macOS or iOS on same network) at `localhost:5002` as "Meade LX200 Classic". In demo mode, SkySafari should show a moving reticle.
+```bash
+brew install astrometry-net
+# solve-field is now at /opt/homebrew/bin/solve-field (on Apple Silicon)
+
+# Download 4100-series wide-field indexes (~2 GB total, or pick a subset)
+# The 4107-4119 series covers most fields ≤ 60° FOV
+mkdir -p ~/astrometry/indexes
+cd ~/astrometry/indexes
+for i in 4107 4108 4109 4110; do
+    wget "https://data.astrometry.net/4100/index-$i.fits"
+done
+```
+
+Update `src/appsettings.json`:
+
+```json
+"Astrometry": {
+  "SolveFieldPath": "/opt/homebrew/bin/solve-field",
+  "IndexPath": "/Users/you/astrometry/indexes",
+  "Timeout": 60
+}
+```
+
+Then run with `Solver__Backend=astrometry` and upload a JPEG via the web UI `POST /solve` or `curl`:
+
+```bash
+curl -X POST http://localhost:5001/solve -F "file=@my_sky_image.jpg"
+```
+
+#### Cedar
+
+Cedar requires the `cedar-detect` Python package. Install it into a local venv:
+
+```bash
+python3 -m venv ~/.stepsolve-venv
+~/.stepsolve-venv/bin/pip install cedar-detect
+```
+
+You also need a Cedar star catalog database. If you have one from a Pi setup, copy it locally. Then update `src/appsettings.json`:
+
+```json
+"Solver": {
+  "Backend": "cedar",
+  "Cedar": {
+    "PythonPath": "/Users/you/.stepsolve-venv/bin/python",
+    "ScriptPath": "/Users/you/Development/solve/stepsolve/scripts/cedar_solve_service.py",
+    "IndexPath": "/Users/you/astrometry/cedar-default"
+  }
+}
+```
+
+Run the app and upload an image to test. If `cedar-detect` is not available on your architecture, the subprocess will print `{"ready": false, "error": "cedar_detect not installed"}` to stderr and the solve will fail gracefully.
+
+#### Tetra3
+
+Tetra3 is pure Python and runs on any platform:
+
+```bash
+python3 -m venv ~/.stepsolve-venv
+~/.stepsolve-dev-venv/bin/pip install "git+https://github.com/esa/tetra3.git"
+```
+
+Download a Tetra3 database from the [tetra3 GitHub releases](https://github.com/esa/tetra3/releases) (`tetra3_database.npz` or similar). Update `src/appsettings.json`:
+
+```json
+"Solver": {
+  "Backend": "tetra3",
+  "Tetra3": {
+    "PythonPath": "/Users/you/.stepsolve-venv/bin/python",
+    "ScriptPath": "/Users/you/Development/solve/stepsolve/scripts/tetra3_solve_service.py",
+    "IndexPath": "/Users/you/astrometry/tetra3_database"
+  }
+}
+```
+
+`IndexPath` for Tetra3 is the path to the database file (without `.npz` extension, as tetra3 appends it).
+
+#### Quick Mac smoke test (no star catalogs needed)
+
+```bash
+# 1. Start in demo mode — verifies LX200 and WebSocket work
+dotnet run --project src
+
+# 2. Run all tests — verifies solver pipe protocol, backend selection, API, etc.
+dotnet test
+
+# 3. Manual upload solve (any JPEG) — tests the solver with a real image
+curl -X POST http://localhost:5001/solve?demo=1    # fake result, no image needed
+curl -X POST http://localhost:5001/solve -F "file=@my_photo.jpg"  # real image, Astrometry needed
+
+# 4. Test LX200 protocol directly
+echo -n ':GR#' | nc localhost 5002
+
+# 5. Check backend selection error handling
+Solver__Backend=bogus dotnet run --project src    # should fail at startup with a clear error
+```
 
 ### 11.4 Cross-compilation
 
 Build the Pi binary from Mac:
 
 ```bash
-dotnet publish -c Release -r linux-arm64 --self-contained -p:PublishAot=true
+dotnet publish src -c Release -r linux-arm64 --self-contained
+# Output: src/bin/Release/net10.0/linux-arm64/publish/stepsolve
 ```
 
-This uses .NET's cross-compilation support — no Docker, no QEMU, no remote build needed.
+No Docker, QEMU, or remote build required. (Native AOT produces a smaller ~15 MB binary but requires a `linux-arm64` linker; see Epic #5 CI issue.)
 
-### 11.5 Project structure
+### 11.5 Test strategy
+
+| Layer | What is tested | How |
+|-------|---------------|-----|
+| Astrometry solver | Arg building, output parsing, hint logic | Unit tests with captured `solve-field` stdout |
+| Cedar/Tetra3 solvers | Pipe protocol, crash recovery, timeout, cancellation | Unit tests using stub Python scripts |
+| Backend selection | DI registration, unknown-value failure | Unit tests against `SolverRegistration` |
+| LX200 | Command parsing, response formatting, batched input | Unit tests |
+| OnStep | Command construction, safety threshold | Unit tests |
+| API endpoints | Status, mode, settings, solve, image | Integration tests via `TestServer` |
+| WebSocket | Message format, client lifecycle | Integration tests |
+| Config options | Defaults, binding | Unit tests |
+
+#### Testing LX200 with SkySafari
+
+On Mac, point SkySafari (macOS app or iOS on same network) at `localhost:5002`, telescope type "Meade LX200 Classic". In demo mode, SkySafari should show a moving telescope reticle.
+
+### 11.6 Project structure
 
 ```
 stepsolve/
@@ -933,43 +1101,35 @@ stepsolve/
 │   ├── OnStepClient.cs
 │   ├── Solvers/
 │   │   ├── ISolver.cs
+│   │   ├── PythonSolverBase.cs      ← shared subprocess + pipe logic
 │   │   ├── AstrometrySolver.cs
 │   │   ├── CedarSolver.cs
-│   │   └── Tetra3Solver.cs
+│   │   ├── Tetra3Solver.cs
+│   │   ├── SolverRouter.cs          ← dispatches to active backend at call time
+│   │   └── SolverRegistration.cs    ← DI registration (all backends + router)
 │   ├── CameraCapture.cs
 │   ├── StepSolveOptions.cs
 │   ├── SolveResult.cs
 │   ├── SolveState.cs
+│   ├── appsettings.json
 │   └── wwwroot/
 │       ├── index.html
-│       ├── css/
-│       │   └── app.css
-│       └── js/
-│           ├── app.js
-│           ├── api.js
-│           └── logs.js
-├── solvers/
-│   ├── cedar_solve_service.py
-│   ├── tetra3_solve_service.py
-│   └── requirements.txt
+│       └── css/ js/
+├── scripts/
+│   ├── cedar_solve_service.py       ← Python subprocess wrapper (Cedar)
+│   ├── tetra3_solve_service.py      ← Python subprocess wrapper (Tetra3)
+│   ├── tetra3_tune.py               ← parameter sweep tool (dev only)
+│   └── setup_solver_venv.sh         ← Pi venv setup (idempotent)
 ├── tests/
-│   └── StepSolve.Tests/
-│       ├── Solvers/
-│       ├── Lx200ServerTests.cs
-│       ├── OnStepClientTests.cs
-│       └── ...
-├── deploy/
-│   ├── stepsolve.service
-│   ├── install.sh
-│   └── avahi/
-├── docs/
-│   ├── PRD.md
-│   └── REWRITE_PLAN.md
-├── appsettings.json
-├── appsettings.Development.json
-├── stepsolve.csproj
-├── .gitignore
-└── README.md
+│   ├── AstrometrySolverTests.cs
+│   ├── CedarSolverTests.cs
+│   ├── Tetra3SolverTests.cs
+│   ├── BackendSelectionTests.cs
+│   ├── ApiEndpointTests.cs
+│   └── ...
+└── docs/
+    ├── PRD.md
+    └── REWRITE_PLAN.md
 ```
 
 ---
