@@ -15,7 +15,6 @@ public class Tetra3SolverIntegrationTests : IDisposable
     private const string PythonPath = "/Users/tomo/.stepsolve-dev-venv/bin/python";
     private const string ScriptPath = "/Users/tomo/Development/solve/stepsolve/scripts/tetra3_solve_service.py";
     private const string IndexPath  = "/Users/tomo/.stepsolve-dev-venv/lib/python3.13/site-packages/tetra3/data/default_database";
-    private const double FovDeg     = 34.3;  // diagonal FOV for RPi HQ + 16mm lens
 
     public Tetra3SolverIntegrationTests() => Directory.CreateDirectory(_tempDir);
     public void Dispose() => Directory.Delete(_tempDir, recursive: true);
@@ -43,7 +42,7 @@ public class Tetra3SolverIntegrationTests : IDisposable
     {
         var opts = new SolverOptions
         {
-            FovEstimateDeg = FovDeg,
+            FovEstimateDeg = 0,  // no hint — demo images are from mixed hardware
             Tetra3 = new Tetra3Options
             {
                 PythonPath = PythonPath,

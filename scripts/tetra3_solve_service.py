@@ -28,6 +28,45 @@ if not hasattr(np, 'math'):
     np.math = math
 
 
+def _solve_with_sigma_retry(t3, image, solve_kwargs: dict):
+    """Try to solve starting at sigma=3, adapting on failure based on centroid count.
+
+    Clean images have few centroids and may need sigma lowered; noisy images
+    (obstructions, foliage) have hundreds and need it raised. Centroid count at
+    the starting sigma guides which direction to retry.
+
+    Sigma schedule:
+      - Start:          sigma=3  (biased towards clean images)
+      - Too many (>100): sigma=5, then sigma=6
+      - Too few   (<10): sigma=2
+    """
+    _SIGMA_START     = 3
+    _SIGMA_SPARSE    = 2    # retry when centroids are very few
+    _SIGMA_NOISY     = 5    # retry when centroids are very many
+    _SIGMA_VERY_NOISY = 6   # second retry for extremely noisy images
+    _CENTROID_HIGH   = 100  # above this → image is too noisy at current sigma
+    _CENTROID_LOW    = 10   # below this → image is too sparse at current sigma
+
+    result = t3.solve_from_image(image, sigma=_SIGMA_START, **solve_kwargs)
+    if result and result.get("RA") is not None:
+        return result
+
+    try:
+        n = len(tetra3.get_centroids_from_image(image, sigma=_SIGMA_START))
+    except Exception:
+        return result  # can't get centroid count, give up
+
+    if n > _CENTROID_HIGH:
+        result = t3.solve_from_image(image, sigma=_SIGMA_NOISY, **solve_kwargs)
+        if result and result.get("RA") is not None:
+            return result
+        result = t3.solve_from_image(image, sigma=_SIGMA_VERY_NOISY, **solve_kwargs)
+    elif n < _CENTROID_LOW:
+        result = t3.solve_from_image(image, sigma=_SIGMA_SPARSE, **solve_kwargs)
+
+    return result
+
+
 def main():
     database_path = sys.argv[1] if len(sys.argv) > 1 else "tetra3_database"
 
@@ -64,13 +103,16 @@ def main():
 
             image = PILImage.open(image_path)
 
-            solve_kwargs = {}
+            # Fixed tuning constants (from parameter sweep across demo images).
+            # fov_max_error is absolute degrees; 8° gives enough window for the
+            # solver's internal scale definition to differ from our diagonal FOV.
+            # pattern_checking_stars=12 is needed for the noisiest images.
+            solve_kwargs = {"fov_max_error": 8.0, "pattern_checking_stars": 12}
             fov = req.get("fov_estimate_deg")
             if fov:
                 solve_kwargs["fov_estimate"] = fov
-                solve_kwargs["fov_max_error"] = fov * 0.5
 
-            result = t3.solve_from_image(image, **solve_kwargs)
+            result = _solve_with_sigma_retry(t3, image, solve_kwargs)
             elapsed_ms = (time.monotonic() - start) * 1000
 
             if result and result.get("RA") is not None:
@@ -82,8 +124,7 @@ def main():
                 }), flush=True)
             else:
                 try:
-                    diag = t3.get_centroids_from_image(image)
-                    n_centroids = len(diag)
+                    n_centroids = len(tetra3.get_centroids_from_image(image, sigma=3))
                 except Exception:
                     n_centroids = "error"
                 print(json.dumps({
