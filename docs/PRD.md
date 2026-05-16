@@ -138,10 +138,11 @@ One process. One binary. One systemd unit. All components share in-memory state 
 | `Lx200Server.cs` | TCP listener for SkySafari on port 5002. Thread-per-client. |
 | `OnStepClient.cs` | TCP client to OnStepX on port 9998. Sync RA/Dec after solve. |
 | `ISolver.cs` | Interface: `Task<SolveResult> SolveAsync(string imagePath, SolveHints? hints)` |
+| `SolverRouter.cs` | `ISolver` implementation that dispatches to the configured backend at call time |
 | `AstrometrySolver.cs` | Shells out to `solve-field`, parses stdout |
 | `CedarSolver.cs` | Manages long-running `cedar_solve_service.py` via stdin/stdout pipe |
 | `Tetra3Solver.cs` | Same pipe pattern for `tetra3_solve_service.py` |
-| `CameraCapture.cs` | Shells out to `rpicam-still` (mock on macOS) |
+| `CameraCapture.cs` | Shells out to `rpicam-still` (mock on macOS: picks a random demo image) |
 | `StepSolveOptions.cs` | Strongly-typed config bound from `appsettings.json` |
 | `SolveResult.cs` | Record struct for solve output |
 | `SolveState.cs` | Thread-safe shared state: latest RA/Dec, confidence, timestamp |
@@ -478,18 +479,55 @@ Or on fatal error (catalog not found, import failure):
 
 Same long-running pipe pattern as Cedar. `tetra3_solve_service.py` loads the Tetra3 database once at startup using `tetra3.Tetra3(database_path)`, then processes requests via `t3.solve_from_image(PIL.Image)`.
 
-The pipe protocol is identical to Cedar (same request/response/ready schema).
+#### Pipe protocol (differs from Cedar)
+
+**Request** (StepSolve → Python):
+```json
+{"image_path": "...", "ra_hint": null, "dec_hint": null, "radius_deg": null, "fov_estimate_deg": 34.3}
+```
+`fov_estimate_deg` is omitted (or zero) when `Solver:FovEstimateDeg` is not configured.
+
+**Success response** (Python → StepSolve):
+```json
+{"ra_deg": 296.94, "dec_deg": 42.69, "confidence": 1.0, "solve_time_ms": 125.0, "sigma_used": 5, "attempts": 2}
+```
+
+**Failure response:**
+```json
+{"ra_deg": 0.0, "dec_deg": 0.0, "confidence": 0.0, "solve_time_ms": 95.0, "sigma_used": 6, "attempts": 3, "error": "no solution (centroids=47)"}
+```
+
+`sigma_used` and `attempts` are logged at debug level on success when `attempts > 1`, and included in the warning on failure.
+
+#### Adaptive sigma retry
+
+Star detection threshold (`sigma`) is the primary knob for handling noisy images (obstructions, foliage, power lines). The service starts at `sigma=3` (biased towards clean images) and adjusts on failure based on the centroid count at that sigma:
+
+| Centroid count at σ=3 | Action |
+|-----------------------|--------|
+| < 10 | Retry at σ=2 (very sparse/dark image) |
+| 10–100 | Give up (sigma is unlikely to help) |
+| > 100 | Retry at σ=5, then σ=6 (noisy image) |
+
+This means noisy images typically require 2–3 solve attempts (~150–400 ms total); clean images solve on the first attempt (~50 ms).
+
+#### FOV hint
+
+`Solver:FovEstimateDeg` is a global hardware setting — set once to the diagonal field of view of your camera+lens combination. When set, it narrows Tetra3's pattern search, improving reliability and speed. `fov_max_error` is fixed at **8°** (absolute, not a fraction), which provides enough window for Tetra3's internal scale definition to differ slightly from the configured diagonal FOV.
+
+**Important:** Tetra3's solve quality degrades significantly on noisy images when no FOV hint is provided, because the unconstrained search space is too large to reliably match patterns against a noisy centroid field. The bundled demo images were captured with different hardware and have varying FOVs — two of the four may not solve reliably in demo mode without a matching FOV setting. This is a demo-only limitation; in production, `FovEstimateDeg` is configured for the actual hardware and all captured images are consistent.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `Tetra3:PythonPath` | `/var/lib/stepsolve/solvers/.venv/bin/python` | Python interpreter in the solver venv |
 | `Tetra3:ScriptPath` | `/var/lib/stepsolve/solvers/tetra3_solve_service.py` | Path to the wrapper script |
-| `Tetra3:IndexPath` | `/var/lib/stepsolve/indexes/tetra3-default` | Tetra3 database file path |
+| `Tetra3:IndexPath` | `/var/lib/stepsolve/indexes/tetra3-default` | Tetra3 database file path (without `.npz`) |
 | `Tetra3:Timeout` | `30` | Per-solve timeout in seconds |
+| `Solver:FovEstimateDeg` | `0` (no hint) | Diagonal FOV of the camera+lens in degrees |
 
 ### 6.5 Solver selection
 
-Set `Solver:Backend` in `appsettings.json` to select the active solver at startup:
+Set `Solver:Backend` in `appsettings.json` to select the active solver:
 
 ```json
 {
@@ -499,9 +537,9 @@ Set `Solver:Backend` in `appsettings.json` to select the active solver at startu
 }
 ```
 
-Valid values: `astrometry`, `cedar`, `tetra3` (case-insensitive). An unknown value throws `InvalidOperationException` at startup with a clear error message listing valid options — the service will not start.
+Valid values: `astrometry`, `cedar`, `tetra3` (case-insensitive).
 
-**Important:** The backend is wired at startup via DI. Changing `Backend` in `appsettings.json` requires a service restart to take effect. Hot-reload via `POST /settings` updates the persisted config but the active solver only changes after restart.
+All three backends are registered at startup. `SolverRouter` (the registered `ISolver`) reads `Solver:Backend` via `IOptionsMonitor` at each call, so switching backends via `POST /settings` takes effect on the **next solve cycle without a restart**. Unknown backend values are caught at solve time and logged as errors (the service starts regardless).
 
 If the active solver fails (e.g., no solution found), there is **no automatic fallback to a different backend**. The within-Astrometry Phase 1 → Phase 2 XY-file fallback is the only cross-attempt fallback.
 
@@ -595,6 +633,7 @@ After each capture, the image (or a downscaled version) is available at `GET /so
   },
   "Solver": {
     "Backend": "astrometry",
+    "FovEstimateDeg": 34.3,
     "HintTimeout": 10,
     "SolveRadius": 20.0,
     "EnableFallback": true,
@@ -1066,7 +1105,8 @@ stepsolve/
 │   │   ├── AstrometrySolver.cs
 │   │   ├── CedarSolver.cs
 │   │   ├── Tetra3Solver.cs
-│   │   └── SolverRegistration.cs    ← DI backend wiring
+│   │   ├── SolverRouter.cs          ← dispatches to active backend at call time
+│   │   └── SolverRegistration.cs    ← DI registration (all backends + router)
 │   ├── CameraCapture.cs
 │   ├── StepSolveOptions.cs
 │   ├── SolveResult.cs
@@ -1078,6 +1118,7 @@ stepsolve/
 ├── scripts/
 │   ├── cedar_solve_service.py       ← Python subprocess wrapper (Cedar)
 │   ├── tetra3_solve_service.py      ← Python subprocess wrapper (Tetra3)
+│   ├── tetra3_tune.py               ← parameter sweep tool (dev only)
 │   └── setup_solver_venv.sh         ← Pi venv setup (idempotent)
 ├── tests/
 │   ├── AstrometrySolverTests.cs
