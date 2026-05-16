@@ -28,7 +28,7 @@ if not hasattr(np, 'math'):
     np.math = math
 
 
-def _solve_with_sigma_retry(t3, image, solve_kwargs: dict):
+def _solve_with_sigma_retry(t3, image, solve_kwargs: dict) -> tuple[dict | None, int, int]:
     """Try to solve starting at sigma=3, adapting on failure based on centroid count.
 
     Clean images have few centroids and may need sigma lowered; noisy images
@@ -36,35 +36,45 @@ def _solve_with_sigma_retry(t3, image, solve_kwargs: dict):
     the starting sigma guides which direction to retry.
 
     Sigma schedule:
-      - Start:          sigma=3  (biased towards clean images)
+      - Start:           sigma=3  (biased towards clean images)
       - Too many (>100): sigma=5, then sigma=6
       - Too few   (<10): sigma=2
-    """
-    _SIGMA_START     = 3
-    _SIGMA_SPARSE    = 2    # retry when centroids are very few
-    _SIGMA_NOISY     = 5    # retry when centroids are very many
-    _SIGMA_VERY_NOISY = 6   # second retry for extremely noisy images
-    _CENTROID_HIGH   = 100  # above this → image is too noisy at current sigma
-    _CENTROID_LOW    = 10   # below this → image is too sparse at current sigma
 
-    result = t3.solve_from_image(image, sigma=_SIGMA_START, **solve_kwargs)
+    Returns (result, sigma_used, attempts).
+    """
+    _SIGMA_START      = 3
+    _SIGMA_SPARSE     = 2    # retry when centroids are very few
+    _SIGMA_NOISY      = 5    # retry when centroids are very many
+    _SIGMA_VERY_NOISY = 6    # second retry for extremely noisy images
+    _CENTROID_HIGH    = 100  # above this → image is too noisy at current sigma
+    _CENTROID_LOW     = 10   # below this → image is too sparse at current sigma
+
+    sigma = _SIGMA_START
+    attempts = 1
+    result = t3.solve_from_image(image, sigma=sigma, **solve_kwargs)
     if result and result.get("RA") is not None:
-        return result
+        return result, sigma, attempts
 
     try:
         n = len(tetra3.get_centroids_from_image(image, sigma=_SIGMA_START))
     except Exception:
-        return result  # can't get centroid count, give up
+        return result, sigma, attempts
 
     if n > _CENTROID_HIGH:
-        result = t3.solve_from_image(image, sigma=_SIGMA_NOISY, **solve_kwargs)
+        sigma = _SIGMA_NOISY
+        attempts += 1
+        result = t3.solve_from_image(image, sigma=sigma, **solve_kwargs)
         if result and result.get("RA") is not None:
-            return result
-        result = t3.solve_from_image(image, sigma=_SIGMA_VERY_NOISY, **solve_kwargs)
+            return result, sigma, attempts
+        sigma = _SIGMA_VERY_NOISY
+        attempts += 1
+        result = t3.solve_from_image(image, sigma=sigma, **solve_kwargs)
     elif n < _CENTROID_LOW:
-        result = t3.solve_from_image(image, sigma=_SIGMA_SPARSE, **solve_kwargs)
+        sigma = _SIGMA_SPARSE
+        attempts += 1
+        result = t3.solve_from_image(image, sigma=sigma, **solve_kwargs)
 
-    return result
+    return result, sigma, attempts
 
 
 def main():
@@ -112,7 +122,7 @@ def main():
             if fov:
                 solve_kwargs["fov_estimate"] = fov
 
-            result = _solve_with_sigma_retry(t3, image, solve_kwargs)
+            result, sigma_used, attempts = _solve_with_sigma_retry(t3, image, solve_kwargs)
             elapsed_ms = (time.monotonic() - start) * 1000
 
             if result and result.get("RA") is not None:
@@ -121,6 +131,8 @@ def main():
                     "dec_deg": float(result["Dec"]),
                     "confidence": 1.0,
                     "solve_time_ms": elapsed_ms,
+                    "sigma_used": sigma_used,
+                    "attempts": attempts,
                 }), flush=True)
             else:
                 try:
@@ -132,6 +144,8 @@ def main():
                     "dec_deg": 0.0,
                     "confidence": 0.0,
                     "solve_time_ms": elapsed_ms,
+                    "sigma_used": sigma_used,
+                    "attempts": attempts,
                     "error": f"no solution (centroids={n_centroids})",
                 }), flush=True)
 

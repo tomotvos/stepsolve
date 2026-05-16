@@ -198,9 +198,13 @@ public abstract class PythonSolverBase : ISolver, IDisposable
             if (resp == null) return Fail(sw);
             if (resp.Error != null)
             {
-                _logger.LogWarning("{Solver} returned solve error: {Error}", _solverName, resp.Error);
+                _logger.LogWarning("{Solver} solve failed after {Attempts} attempt(s) (sigma={Sigma}): {Error}",
+                    _solverName, resp.Attempts, resp.SigmaUsed, resp.Error);
                 return Fail(sw);
             }
+            if (resp.Attempts > 1)
+                _logger.LogDebug("{Solver} solved on attempt {Attempts} with sigma={Sigma}",
+                    _solverName, resp.Attempts, resp.SigmaUsed);
             return new SolveResult(resp.RaDeg, resp.DecDeg, null, null, resp.Confidence, sw.Elapsed, _solverName);
         }
         catch (Exception ex)
@@ -246,5 +250,7 @@ public abstract class PythonSolverBase : ISolver, IDisposable
         [property: JsonPropertyName("dec_deg")] double DecDeg = 0,
         [property: JsonPropertyName("confidence")] double Confidence = 0,
         [property: JsonPropertyName("solve_time_ms")] double SolveTimeMs = 0,
+        [property: JsonPropertyName("sigma_used")] int SigmaUsed = 0,
+        [property: JsonPropertyName("attempts")] int Attempts = 1,
         [property: JsonPropertyName("error")] string? Error = null);
 }
