@@ -8,7 +8,7 @@ namespace StepSolve;
 
 /// <summary>
 /// Background service that runs the capture → solve → publish loop.
-/// In demo mode, generates a simulated RA/Dec sweep.
+/// In demo mode, cycles through bundled demo images and runs the real solver on them.
 /// </summary>
 public sealed class StepSolveService : BackgroundService
 {
@@ -19,10 +19,6 @@ public sealed class StepSolveService : BackgroundService
     private readonly WebSocketBroadcaster _ws;
     private readonly IConfiguration _config;
     private readonly ILogger<StepSolveService> _logger;
-
-    // Demo sweep state
-    private double _demoRa;
-    private double _demoDec = 45.0;
 
     public StepSolveService(
         ICameraCapture camera,
@@ -58,7 +54,7 @@ public sealed class StepSolveService : BackgroundService
                         await RunSolveCycle(stoppingToken);
                         break;
                     case "demo":
-                        RunDemoCycle();
+                        await RunDemoCycle(stoppingToken);
                         break;
                     default: // idle
                         break;
@@ -122,25 +118,46 @@ public sealed class StepSolveService : BackgroundService
         }
     }
 
-    private void RunDemoCycle()
+    // Bypasses the camera entirely so demo works on any platform, including the RPi without a live sky.
+    private async Task RunDemoCycle(CancellationToken ct)
     {
-        // Simulate a smooth RA sweep (full circle in ~6 minutes)
-        _demoRa = (_demoRa + 1.0) % 360.0;
+        var demoDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", "demo");
+        if (!Directory.Exists(demoDir))
+        {
+            _logger.LogDebug("Demo directory not found: {Dir}", demoDir);
+            return;
+        }
 
-        var result = new SolveResult(
-            RaDeg: _demoRa,
-            DecDeg: _demoDec,
-            RollDeg: null,
-            PlateScaleArcsecPerPx: null,
-            Confidence: 0.99,
-            SolveTime: TimeSpan.FromMilliseconds(12),
-            SolverName: "demo"
-        );
+        var images = Directory.GetFiles(demoDir, "*.jpg");
+        if (images.Length == 0)
+        {
+            _logger.LogDebug("No demo images found in {Dir}", demoDir);
+            return;
+        }
 
-        _state.UpdateResult(result);
-        _ = _ws.BroadcastSolve(result);
-        _ = _ws.BroadcastStatus(CurrentMode, "solved", _onstep);
-        _logger.LogDebug("Demo: RA={Ra:F2}° Dec={Dec:F2}°", result.RaDeg, result.DecDeg);
+        var imagePath = images[Random.Shared.Next(images.Length)];
+
+        _state.SetState("solving");
+        _ = _ws.BroadcastStatus(CurrentMode, "solving", _onstep);
+
+        var result = await _solver.SolveAsync(imagePath, hints: null, ct);
+
+        if (result.IsValid)
+        {
+            _state.UpdateResult(result, imagePath);
+            _logger.LogInformation(
+                "Demo solved: RA={Ra:F4}° Dec={Dec:F4}° Conf={Conf:F2} Time={Time:F1}s Solver={Solver}",
+                result.RaDeg, result.DecDeg, result.Confidence,
+                result.SolveTime.TotalSeconds, result.SolverName);
+            _ = _ws.BroadcastSolve(result, hasImage: true);
+            _ = _ws.BroadcastStatus(CurrentMode, "solved", _onstep);
+        }
+        else
+        {
+            _state.SetState("idle");
+            _ = _ws.BroadcastStatus(CurrentMode, "idle", _onstep);
+            _logger.LogDebug("Demo solve returned no result for {Image}", Path.GetFileName(imagePath));
+        }
     }
 
     private string CurrentMode =>

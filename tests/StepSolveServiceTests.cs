@@ -53,29 +53,42 @@ public class StepSolveServiceTests
     }
 
     [Fact]
-    public async Task DemoMode_UpdatesState_WithSweep()
+    public async Task DemoMode_CallsSolverWithDemoImage_NotCamera()
     {
-        var state = new SolveState();
-        var camera = new StubCamera();
-        var solver = new StubSolver();
-        var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
-            CreateConfig("demo"), NullLogger<StepSolveService>.Instance);
+        var demoDir = Path.Combine(AppContext.BaseDirectory, "wwwroot", "demo");
+        Directory.CreateDirectory(demoDir);
+        var demoImage = Path.Combine(demoDir, $"test_{Guid.NewGuid():N}.jpg");
+        File.WriteAllBytes(demoImage, [0xFF, 0xD8, 0xFF, 0xE0]); // minimal JPEG header
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        try
+        {
+            var state = new SolveState();
+            var camera = new StubCamera();
+            var solver = new StubSolver
+            {
+                ResultToReturn = new SolveResult(180.0, 45.0, null, null, 0.95, TimeSpan.FromMilliseconds(200), "tetra3")
+            };
+            var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
+                CreateConfig("demo"), NullLogger<StepSolveService>.Instance);
 
-        try { await service.StartAsync(cts.Token); await Task.Delay(2500, cts.Token); }
-        catch (OperationCanceledException) { }
-        finally { await service.StopAsync(CancellationToken.None); }
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            try { await service.StartAsync(cts.Token); await Task.Delay(2500, cts.Token); }
+            catch (OperationCanceledException) { }
+            finally { await service.StopAsync(CancellationToken.None); }
 
-        // Demo mode should have updated state with coordinates
-        var (result, _, _) = state.Current;
-        Assert.NotNull(result);
-        Assert.Equal("demo", result!.Value.SolverName);
-        Assert.True(result!.Value.RaDeg > 0);
+            Assert.Equal(0, camera.CaptureCount);
+            Assert.True(solver.SolveCount > 0, "Solver should have been called with demo image");
+            Assert.StartsWith(demoDir, solver.LastImagePath);
 
-        // Camera and solver should NOT be called in demo mode
-        Assert.Equal(0, camera.CaptureCount);
-        Assert.Equal(0, solver.SolveCount);
+            var (result, _, _) = state.Current;
+            Assert.NotNull(result);
+            Assert.Equal(180.0, result!.Value.RaDeg);
+            Assert.Equal("tetra3", result!.Value.SolverName);
+        }
+        finally
+        {
+            if (File.Exists(demoImage)) File.Delete(demoImage);
+        }
     }
 
     [Fact]
