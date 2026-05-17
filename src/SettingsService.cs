@@ -120,32 +120,44 @@ public sealed class SettingsService
 
             foreach (var (section, values) in settings)
             {
-                var sectionNode = root[section]?.AsObject();
-                if (sectionNode == null)
-                {
-                    sectionNode = new JsonObject();
-                    root[section] = sectionNode;
-                }
-
                 foreach (var (key, value) in values)
                 {
                     var strVal = value?.ToString() ?? "";
+                    if (strVal == "") continue; // don't overwrite with empty
 
-                    // Try to preserve JSON types (bool, int, double) rather than storing everything as strings
-                    if (bool.TryParse(strVal, out var boolVal))
-                        sectionNode[key] = boolVal;
-                    else if (int.TryParse(strVal, out var intVal))
-                        sectionNode[key] = intVal;
-                    else if (double.TryParse(strVal, out var dblVal))
-                        sectionNode[key] = dblVal;
-                    else
-                        sectionNode[key] = strVal;
+                    // Split full path (e.g. "Solver:Tetra3" + "IndexPath" → ["Solver","Tetra3","IndexPath"])
+                    var segments = $"{section}:{key}".Split(':');
+                    SetNestedValue(root.AsObject(), segments, strVal);
                 }
             }
 
             var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(_settingsPath, json);
         }
+    }
+
+    private static void SetNestedValue(JsonObject node, string[] segments, string strVal)
+    {
+        for (int i = 0; i < segments.Length - 1; i++)
+        {
+            var seg = segments[i];
+            if (node[seg] is not JsonObject child)
+            {
+                child = new JsonObject();
+                node[seg] = child;
+            }
+            node = child;
+        }
+
+        var lastKey = segments[^1];
+        if (bool.TryParse(strVal, out var boolVal))
+            node[lastKey] = boolVal;
+        else if (int.TryParse(strVal, out var intVal))
+            node[lastKey] = intVal;
+        else if (double.TryParse(strVal, out var dblVal))
+            node[lastKey] = dblVal;
+        else
+            node[lastKey] = strVal;
     }
 
     private static string? ValidPort(string value)
