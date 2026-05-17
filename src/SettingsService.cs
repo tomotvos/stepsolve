@@ -82,7 +82,7 @@ public sealed class SettingsService
                     "StepSolve:WebPort" => ValidPort(value),
                     "StepSolve:Lx200Port" => ValidPort(value),
                     "Solver:Backend" => ValidBackends.Contains(value) ? null : "Backend must be astrometry, cedar, or tetra3",
-                    "Solver:FovEstimateDeg" => ValidPositiveDouble(value, "FovEstimateDeg"),
+                    "Solver:FovEstimateDeg" => ValidNonNegativeDouble(value, "FovEstimateDeg"),
                     "Solver:HintTimeout" => ValidPositiveInt(value, "HintTimeout"),
                     "Solver:SolveRadius" => ValidPositiveDouble(value, "SolveRadius"),
                     "Camera:ShutterUs" => ValidPositiveInt(value, "ShutterUs"),
