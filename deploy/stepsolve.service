@@ -1,0 +1,15 @@
+[Unit]
+Description=StepSolve plate solver
+After=network.target
+
+[Service]
+ExecStart=/usr/local/lib/stepsolve/stepsolve
+WorkingDirectory=/var/lib/stepsolve
+Restart=always
+RestartSec=5
+User=stepsolve
+Group=stepsolve
+Environment=DOTNET_ENVIRONMENT=Production
+
+[Install]
+WantedBy=multi-user.target

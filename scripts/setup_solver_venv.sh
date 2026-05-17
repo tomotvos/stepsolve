@@ -28,15 +28,19 @@ fi
 echo "==> Upgrading pip"
 "$VENV_DIR/bin/pip" install --quiet --upgrade pip
 
-echo "==> Installing Cedar and Tetra3 dependencies"
-"$VENV_DIR/bin/pip" install --quiet \
-    cedar-detect \
-    "git+https://github.com/esa/tetra3.git"
+echo "==> Installing Tetra3 (pinned)"
+"$VENV_DIR/bin/pip" install --quiet -r "$SCRIPT_DIR/requirements-solvers.txt"
 
 echo "==> Copying solver scripts to $SOLVERS_DIR"
-cp "$SCRIPT_DIR/cedar_solve_service.py"  "$SOLVERS_DIR/"
 cp "$SCRIPT_DIR/tetra3_solve_service.py" "$SOLVERS_DIR/"
-chmod +x "$SOLVERS_DIR/cedar_solve_service.py"
 chmod +x "$SOLVERS_DIR/tetra3_solve_service.py"
 
+TETRA3_DB=$("$VENV_DIR/bin/python" -c \
+    "import tetra3, os; print(os.path.join(os.path.dirname(tetra3.__file__), 'data', 'default_database'))" \
+    2>/dev/null || echo "unknown")
+
 echo "==> Done. Solver venv ready at $VENV_DIR"
+echo ""
+echo "==> Tetra3 default database path:"
+echo "    $TETRA3_DB"
+echo "    Set Solver:Tetra3:IndexPath to this value in appsettings.json"

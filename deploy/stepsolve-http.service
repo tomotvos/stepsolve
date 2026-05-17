@@ -1,0 +1,9 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name>StepSolve Web</name>
+  <service>
+    <type>_http._tcp</type>
+    <port>5001</port>
+  </service>
+</service-group>

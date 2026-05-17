@@ -47,6 +47,12 @@
         setMaxSyncDelta: document.getElementById('set-max-sync-delta'),
         settingsSave: document.getElementById('settings-save'),
         settingsMsg: document.getElementById('settings-msg'),
+        // Update section
+        updateSection: document.getElementById('update-section'),
+        updateCurrent: document.getElementById('update-current'),
+        updateLatest: document.getElementById('update-latest'),
+        updateBtn: document.getElementById('update-btn'),
+        updateMsg: document.getElementById('update-msg'),
     };
 
     var state = {
@@ -409,6 +415,64 @@
                 els.settingsMsg.textContent = 'Network error';
                 els.settingsMsg.className = 'settings-msg err';
             });
+    });
+
+    // -- Software update --
+
+    function loadUpdateStatus() {
+        fetch('/system/update/check')
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (!data) return;
+                els.updateCurrent.textContent = data.currentVersion || '--';
+                if (data.hasUpdate) {
+                    els.updateLatest.textContent = data.latestVersion + ' ✓ available';
+                    els.updateLatest.className = 'update-available';
+                    els.updateBtn.style.display = '';
+                    // Also surface a badge on the section summary
+                    var summary = els.updateSection.querySelector('summary');
+                    if (summary && !summary.querySelector('.update-dot')) {
+                        var dot = document.createElement('span');
+                        dot.className = 'update-dot';
+                        dot.textContent = ' •';
+                        summary.appendChild(dot);
+                    }
+                } else {
+                    els.updateLatest.textContent = data.latestVersion
+                        ? data.latestVersion + ' (up to date)'
+                        : (data.currentVersion === 'dev' ? 'dev build' : 'up to date');
+                    els.updateLatest.className = '';
+                    els.updateBtn.style.display = 'none';
+                }
+            })
+            .catch(function () {
+                els.updateLatest.textContent = 'check failed (no internet?)';
+            });
+    }
+
+    els.updateBtn.addEventListener('click', function () {
+        els.updateBtn.disabled = true;
+        els.updateMsg.textContent = 'Downloading update…';
+        els.updateMsg.className = 'settings-msg';
+
+        fetch('/system/update', { method: 'POST' })
+            .then(function (r) { return r.json(); })
+            .then(function () {
+                els.updateMsg.textContent = 'Installing… dashboard will reconnect shortly.';
+                // The service will restart; the existing WS reconnect logic handles it automatically.
+            })
+            .catch(function () {
+                els.updateMsg.textContent = 'Update failed.';
+                els.updateMsg.className = 'settings-msg err';
+                els.updateBtn.disabled = false;
+            });
+    });
+
+    // Load update status when the section is opened
+    els.updateSection.addEventListener('toggle', function () {
+        if (els.updateSection.open && els.updateCurrent.textContent === '--') {
+            loadUpdateStatus();
+        }
     });
 
     // -- Init --

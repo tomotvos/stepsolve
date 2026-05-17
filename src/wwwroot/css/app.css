@@ -385,6 +385,28 @@ details summary {
     color: var(--badge-error);
 }
 
+/* Update section */
+#update-content {
+    padding: 0.5rem 0;
+}
+
+#update-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.update-available {
+    color: var(--badge-solved);
+    font-weight: 600;
+}
+
+.update-dot {
+    color: var(--badge-solved);
+    font-weight: 700;
+}
+
 /* Desktop split view */
 @media (min-width: 768px) {
     main {
@@ -399,6 +421,7 @@ details summary {
     #action-bar      { grid-column: 1; }
     #onstep-display  { grid-column: 1; }
     #settings-section { grid-column: 1 / span 2; }
+    #update-section   { grid-column: 1 / span 2; }
     #log-section     { grid-column: 2; grid-row: 1 / span 4; }
     .connection-bar  { grid-column: 1 / span 2; }
 
