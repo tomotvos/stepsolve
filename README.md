@@ -55,16 +55,24 @@ The app detects macOS and skips `rpicam-still`. In Solve mode on Mac, it cycles 
 
 ## Deployment (Raspberry Pi)
 
+See **[`deploy/PI_SETUP.md`](deploy/PI_SETUP.md)** for the full setup guide.
+
+**First install** — flash Pi OS, then from your Mac:
+
 ```bash
-# Build a self-contained linux-arm64 binary on Mac
-dotnet publish src/ -c Release -r linux-arm64 --self-contained
+PI_HOST=pi@stepsolve.local bash scripts/deploy.sh --install
+```
 
-# Copy to Pi and restart
-rsync -az src/bin/Release/*/linux-arm64/publish/ pi@stepsolve.local:/usr/local/lib/stepsolve/
-ssh pi@stepsolve.local "sudo systemctl restart stepsolve"
+**Subsequent deploys** (build + rsync + restart in ~30 s):
 
-# Check it's running
-curl http://stepsolve.local:5001/status
+```bash
+bash scripts/deploy.sh
+```
+
+**Cut a release** (builds, packages, and publishes to GitHub Releases — users can then update via the dashboard):
+
+```bash
+bash scripts/release.sh v1.0.0
 ```
 
 The service is a single self-contained binary managed by systemd. No runtime dependencies on the Pi beyond `rpicam-still` (bundled with Raspberry Pi OS) and optionally `solve-field` for the Astrometry backend.

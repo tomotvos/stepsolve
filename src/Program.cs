@@ -1,8 +1,19 @@
 using StepSolve;
 using StepSolve.Solvers;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 
-var builder = WebApplication.CreateBuilder(args);
+// Read version from file written by release.sh; "dev" for local builds that lack it.
+var versionPath = Path.Combine(AppContext.BaseDirectory, "version.txt");
+var currentVersion = File.Exists(versionPath)
+    ? File.ReadAllText(versionPath).Trim()
+    : "dev";
+
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory,
+});
 
 // Runtime settings file — highest priority, overrides appsettings.Development.json.
 // Written by SettingsService when the user saves from the dashboard.
@@ -18,6 +29,9 @@ builder.Services.Configure<OnStepOptions>(builder.Configuration.GetSection(OnSte
 
 // Shared state — singleton, thread-safe
 builder.Services.AddSingleton<SolveState>();
+
+// HttpClient for GitHub Releases update checks
+builder.Services.AddHttpClient();
 
 // Camera capture
 builder.Services.AddSingleton<ICameraCapture, CameraCapture>();
@@ -58,12 +72,22 @@ var app = builder.Build();
 app.UseWebSockets();
 app.UseStaticFiles();
 
+// Check for updates once at startup (fire-and-forget; result cached in UpdateState).
+// Suppressed for dev builds (version == "dev") and on non-Linux (no-op update anyway).
+var updateState = new UpdateState(currentVersion);
+if (currentVersion != "dev")
+{
+    var httpFactory = app.Services.GetRequiredService<IHttpClientFactory>();
+    _ = updateState.CheckAsync(httpFactory.CreateClient());
+}
+
 // GET /status — current solve state and configuration
 app.MapGet("/status", (SolveState state, IOptions<StepSolveOptions> opts, IOptions<OnStepOptions> onstepOpts, OnStepClient onstepClient) =>
 {
     var (result, timestamp, currentState) = state.Current;
     return Results.Ok(new
     {
+        version = currentVersion,
         mode = opts.Value.Mode,
         state = currentState,
         ra = result?.RaDeg,
@@ -245,6 +269,73 @@ app.MapPost("/system/restart", () =>
     return Results.Ok(new { status = "restarting" });
 });
 
+// GET /system/update/check — cached result from startup check (no per-request network call)
+app.MapGet("/system/update/check", () => Results.Ok(updateState.ToResponse()));
+
+// POST /system/update — download latest release, extract in-place, restart (Linux only)
+app.MapPost("/system/update", async (HttpContext ctx) =>
+{
+    if (!OperatingSystem.IsLinux())
+        return Results.StatusCode(503);
+
+    var info = updateState.ToResponse();
+    if (!info.HasUpdate || info.DownloadUrl == null)
+        return Results.BadRequest(new { error = "No update available" });
+
+    var tmpPath = Path.Combine(Path.GetTempPath(), $"stepsolve-update-{DateTimeOffset.UtcNow.Ticks}.tar.gz");
+    var installDir = AppContext.BaseDirectory;
+    var httpFactory = ctx.RequestServices.GetRequiredService<IHttpClientFactory>();
+
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            using var client = httpFactory.CreateClient();
+            // Follow GitHub redirects (release asset URLs redirect to CDN)
+            client.DefaultRequestHeaders.Add("User-Agent", "StepSolve-Updater");
+            using var response = await client.GetAsync(info.DownloadUrl, HttpCompletionOption.ResponseHeadersRead);
+            response.EnsureSuccessStatusCode();
+            await using (var fs = File.Create(tmpPath))
+                await response.Content.CopyToAsync(fs);
+
+            // Validate: tarball must contain the stepsolve binary
+            var check = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "tar",
+                Arguments = $"-tzf {tmpPath}",
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+            })!;
+            var listing = await check.StandardOutput.ReadToEndAsync();
+            await check.WaitForExitAsync();
+            if (!listing.Contains("stepsolve"))
+            {
+                File.Delete(tmpPath);
+                return;
+            }
+
+            // Extract over the install directory (safe on Linux — binary is already mapped into memory)
+            var extract = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "tar",
+                Arguments = $"-xzf {tmpPath} -C {installDir}",
+                UseShellExecute = false,
+            })!;
+            await extract.WaitForExitAsync();
+            File.Delete(tmpPath);
+
+            await Task.Delay(500);
+            System.Diagnostics.Process.Start("sudo", "systemctl restart stepsolve");
+        }
+        catch
+        {
+            if (File.Exists(tmpPath)) File.Delete(tmpPath);
+        }
+    });
+
+    return Results.Ok(new { status = "update downloading, will restart shortly" });
+});
+
 // GET / — serve the dashboard (falls through to static files wwwroot/index.html)
 app.MapFallbackToFile("index.html");
 
@@ -252,3 +343,51 @@ app.Run();
 
 // Request DTOs
 record ModeRequest(string? Mode);
+
+// Update check state — populated once at startup, read by /system/update/check
+sealed class UpdateState(string currentVersion)
+{
+    private volatile UpdateResponse _response = new(currentVersion, null, false, null);
+
+    public UpdateResponse ToResponse() => _response;
+
+    public async Task CheckAsync(HttpClient client)
+    {
+        const string ApiUrl = "https://api.github.com/repos/tomotvos/stepsolve/releases/latest";
+        try
+        {
+            client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "StepSolve-Updater");
+            var json = await client.GetStringAsync(ApiUrl);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var latest = root.GetProperty("tag_name").GetString() ?? "";
+            string? downloadUrl = null;
+            if (root.TryGetProperty("assets", out var assets))
+            {
+                foreach (var asset in assets.EnumerateArray())
+                {
+                    var name = asset.GetProperty("name").GetString() ?? "";
+                    if (name.Contains("arm64") && name.EndsWith(".tar.gz"))
+                    {
+                        downloadUrl = asset.GetProperty("browser_download_url").GetString();
+                        break;
+                    }
+                }
+            }
+
+            var hasUpdate = latest != currentVersion && downloadUrl != null;
+            _response = new UpdateResponse(currentVersion, latest, hasUpdate, downloadUrl);
+        }
+        catch
+        {
+            // Leave response as default (hasUpdate: false) if check fails (no internet, etc.)
+        }
+    }
+}
+
+record UpdateResponse(
+    string CurrentVersion,
+    string? LatestVersion,
+    bool HasUpdate,
+    string? DownloadUrl);
