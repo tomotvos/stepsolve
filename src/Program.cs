@@ -9,7 +9,11 @@ var currentVersion = File.Exists(versionPath)
     ? File.ReadAllText(versionPath).Trim()
     : "dev";
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = AppContext.BaseDirectory,
+});
 
 // Runtime settings file — highest priority, overrides appsettings.Development.json.
 // Written by SettingsService when the user saves from the dashboard.
