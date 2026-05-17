@@ -98,6 +98,25 @@ fi
 echo "==> Setting up Python solver venv"
 bash "$INSTALL_DIR/scripts/setup_solver_venv.sh"
 
+echo "==> Configuring Tetra3 database path"
+VENV_PYTHON="$DATA_DIR/solvers/.venv/bin/python"
+TETRA3_DB=$("$VENV_PYTHON" -c \
+    "import tetra3, os; print(os.path.join(os.path.dirname(tetra3.__file__), 'data', 'default_database'))" \
+    2>/dev/null)
+if [[ -n "$TETRA3_DB" ]]; then
+    RUNTIME_SETTINGS="$INSTALL_DIR/appsettings.runtime.json"
+    "$VENV_PYTHON" - <<PYEOF
+import json, os
+path = "$RUNTIME_SETTINGS"
+data = json.load(open(path)) if os.path.exists(path) else {}
+data.setdefault("Solver", {}).setdefault("Tetra3", {})["IndexPath"] = "$TETRA3_DB"
+json.dump(data, open(path, "w"), indent=2)
+print(f"    Solver:Tetra3:IndexPath = $TETRA3_DB")
+PYEOF
+else
+    echo "    Could not detect Tetra3 database path — set Solver:Tetra3:IndexPath manually"
+fi
+
 # ── Start service ─────────────────────────────────────────────────────────────
 echo "==> Starting stepsolve service"
 systemctl start stepsolve
