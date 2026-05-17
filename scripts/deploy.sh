@@ -13,6 +13,9 @@ PUBLISH="src/bin/Release/net10.0/linux-arm64/publish"
 echo "==> Building for linux-arm64"
 dotnet publish src/StepSolve.csproj -c Release -r linux-arm64 --self-contained
 
+echo "==> Ensuring install directory exists on Pi"
+ssh "$PI_HOST" 'sudo mkdir -p /usr/local/lib/stepsolve && sudo chown "$(id -u):$(id -g)" /usr/local/lib/stepsolve'
+
 echo "==> Syncing to $PI_HOST"
 rsync -az --progress "$PUBLISH/"  "$PI_HOST:/usr/local/lib/stepsolve/"
 rsync -az scripts/                "$PI_HOST:/usr/local/lib/stepsolve/scripts/"
