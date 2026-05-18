@@ -18,6 +18,7 @@
         stateBadge: document.getElementById('state-badge'),
         modeSelect: document.getElementById('mode-select'),
         themeToggle: document.getElementById('theme-toggle'),
+        shutdownBtn: document.getElementById('shutdown-btn'),
         solveNowBtn: document.getElementById('solve-now-btn'),
         onstepStatus: document.getElementById('onstep-status'),
         onstepLastSync: document.getElementById('onstep-last-sync'),
@@ -304,6 +305,13 @@
     }
 
     // -- User interactions --
+
+    els.shutdownBtn.addEventListener('click', function () {
+        if (!confirm('Shut down the Pi?')) return;
+        els.shutdownBtn.disabled = true;
+        fetch('/system/shutdown', { method: 'POST' })
+            .catch(function () { /* connection drop is expected */ });
+    });
 
     els.themeToggle.addEventListener('click', function () {
         document.documentElement.classList.toggle('night');
