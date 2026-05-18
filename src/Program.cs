@@ -119,7 +119,7 @@ app.Map("/ws", async (HttpContext ctx, WebSocketBroadcaster broadcaster) =>
     await broadcaster.HandleAsync(ws, ctx.RequestAborted);
 });
 
-// POST /mode — change operating mode (solve/demo/idle)
+// POST /mode — change operating mode (solve/demo/idle/calibrate)
 // Accepts JSON body { "mode": "solve" } per PRD, or query string for convenience
 app.MapPost("/mode", async (HttpContext ctx, IConfiguration config) =>
 {
@@ -134,8 +134,8 @@ app.MapPost("/mode", async (HttpContext ctx, IConfiguration config) =>
         mode = ctx.Request.Query["mode"].ToString().ToLowerInvariant();
     }
 
-    if (mode is not ("solve" or "demo" or "idle"))
-        return Results.BadRequest(new { error = "Mode must be solve, demo, or idle" });
+    if (mode is not ("solve" or "demo" or "idle" or "calibrate"))
+        return Results.BadRequest(new { error = "Mode must be solve, demo, idle, or calibrate" });
 
     config["StepSolve:Mode"] = mode;
     return Results.Ok(new { mode });
