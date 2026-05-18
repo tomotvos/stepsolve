@@ -18,6 +18,11 @@
         stateBadge: document.getElementById('state-badge'),
         modeSelect: document.getElementById('mode-select'),
         themeToggle: document.getElementById('theme-toggle'),
+        shutdownBtn: document.getElementById('shutdown-btn'),
+        powerDialog: document.getElementById('power-dialog'),
+        powerCancel: document.getElementById('power-cancel'),
+        powerRestart: document.getElementById('power-restart'),
+        powerShutdown: document.getElementById('power-shutdown'),
         solveNowBtn: document.getElementById('solve-now-btn'),
         onstepStatus: document.getElementById('onstep-status'),
         onstepLastSync: document.getElementById('onstep-last-sync'),
@@ -139,6 +144,9 @@
         if (!mode) return;
         var lower = mode.toLowerCase();
         els.modeSelect.value = lower;
+        var inSolveLoop = lower === 'solve';
+        els.solveNowBtn.disabled = inSolveLoop;
+        els.solveNowBtn.title = inSolveLoop ? 'Solve loop is already running' : '';
     }
 
     function updateOnStep(onstep) {
@@ -245,6 +253,9 @@
                         updateMode(msg.mode);
                         updateOnStep(msg.onstep);
                         break;
+                    case 'image':
+                        refreshImagePreview();
+                        break;
                     case 'log':
                         appendLog(msg.level, msg.message, msg.timestamp);
                         break;
@@ -302,6 +313,28 @@
 
     // -- User interactions --
 
+    els.shutdownBtn.addEventListener('click', function () {
+        els.powerDialog.showModal();
+    });
+
+    els.powerCancel.addEventListener('click', function () {
+        els.powerDialog.close();
+    });
+
+    els.powerShutdown.addEventListener('click', function () {
+        els.powerDialog.close();
+        els.shutdownBtn.disabled = true;
+        fetch('/system/shutdown', { method: 'POST' })
+            .catch(function () { /* connection drop is expected */ });
+    });
+
+    els.powerRestart.addEventListener('click', function () {
+        els.powerDialog.close();
+        els.shutdownBtn.disabled = true;
+        fetch('/system/restart', { method: 'POST' })
+            .catch(function () { /* connection drop is expected */ });
+    });
+
     els.themeToggle.addEventListener('click', function () {
         document.documentElement.classList.toggle('night');
         var isNight = document.documentElement.classList.contains('night');
@@ -334,13 +367,19 @@
 
     els.solveNowBtn.addEventListener('click', function () {
         els.solveNowBtn.disabled = true;
-        fetch('/solve?demo=1', { method: 'POST' })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (data && data.ra != null) updateSolveDisplay(data);
+        fetch('/solve', { method: 'POST' })
+            .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+            .then(function (result) {
+                if (result.ok && result.data && result.data.ra != null) {
+                    updateSolveDisplay(result.data);
+                } else if (!result.ok) {
+                    appendLog('WARNING', result.data && result.data.error ? result.data.error : 'Solve Now failed');
+                }
             })
-            .catch(function () { /* ignore */ })
-            .finally(function () { els.solveNowBtn.disabled = false; });
+            .catch(function () { appendLog('ERROR', 'Solve Now: network error'); })
+            .finally(function () {
+                els.solveNowBtn.disabled = els.modeSelect.value === 'solve';
+            });
     });
 
     // -- Settings panel --

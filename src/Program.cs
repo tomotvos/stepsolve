@@ -119,7 +119,7 @@ app.Map("/ws", async (HttpContext ctx, WebSocketBroadcaster broadcaster) =>
     await broadcaster.HandleAsync(ws, ctx.RequestAborted);
 });
 
-// POST /mode — change operating mode (solve/demo/idle)
+// POST /mode — change operating mode (solve/demo/idle/calibrate)
 // Accepts JSON body { "mode": "solve" } per PRD, or query string for convenience
 app.MapPost("/mode", async (HttpContext ctx, IConfiguration config) =>
 {
@@ -134,8 +134,8 @@ app.MapPost("/mode", async (HttpContext ctx, IConfiguration config) =>
         mode = ctx.Request.Query["mode"].ToString().ToLowerInvariant();
     }
 
-    if (mode is not ("solve" or "demo" or "idle"))
-        return Results.BadRequest(new { error = "Mode must be solve, demo, or idle" });
+    if (mode is not ("solve" or "demo" or "idle" or "calibrate"))
+        return Results.BadRequest(new { error = "Mode must be solve, demo, idle, or calibrate" });
 
     config["StepSolve:Mode"] = mode;
     return Results.Ok(new { mode });
@@ -172,7 +172,7 @@ app.MapPost("/settings", async (HttpContext ctx, SettingsService settingsSvc) =>
 });
 
 // POST /solve — on-demand solve: demo pulse (?demo=1) or uploaded image
-app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, WebSocketBroadcaster ws, OnStepClient onstep, IOptions<StepSolveOptions> opts) =>
+app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, WebSocketBroadcaster ws, OnStepClient onstep, IOptions<StepSolveOptions> opts, ILogger<Program> logger) =>
 {
     if (ctx.Request.Query.ContainsKey("demo"))
     {
@@ -200,25 +200,58 @@ app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, 
     }
 
     // Image upload solve
-    if (!ctx.Request.HasFormContentType || ctx.Request.Form.Files.Count == 0)
-        return Results.BadRequest(new { error = "Provide an image file or use ?demo=1" });
-
-    var file = ctx.Request.Form.Files[0];
-    var tempDir = Path.Combine(AppContext.BaseDirectory, "images");
-    Directory.CreateDirectory(tempDir);
-    var tempPath = Path.Combine(tempDir, $"upload_{DateTimeOffset.UtcNow.Ticks}.jpg");
-
-    await using (var stream = File.Create(tempPath))
+    if (ctx.Request.HasFormContentType && ctx.Request.Form.Files.Count > 0)
     {
-        await file.CopyToAsync(stream, ctx.RequestAborted);
+        var file = ctx.Request.Form.Files[0];
+        var tempDir = Path.Combine(AppContext.BaseDirectory, "images");
+        Directory.CreateDirectory(tempDir);
+        var tempPath = Path.Combine(tempDir, $"upload_{DateTimeOffset.UtcNow.Ticks}.jpg");
+
+        await using (var stream = File.Create(tempPath))
+        {
+            await file.CopyToAsync(stream, ctx.RequestAborted);
+        }
+
+        var uploadResult = await solver.SolveAsync(tempPath, hints: null, ctx.RequestAborted);
+        if (uploadResult.IsValid)
+        {
+            state.UpdateResult(uploadResult, tempPath);
+            _ = ws.BroadcastSolve(uploadResult, hasImage: true);
+            _ = ws.BroadcastStatus(opts.Value.Mode, "solved", onstep);
+        }
+
+        return Results.Ok(new
+        {
+            ra = uploadResult.RaDeg,
+            dec = uploadResult.DecDeg,
+            confidence = uploadResult.Confidence,
+            solver = uploadResult.SolverName,
+            solveTimeMs = uploadResult.SolveTime.TotalMilliseconds,
+            valid = uploadResult.IsValid,
+            imageUrl = uploadResult.IsValid ? "/solve/image" : (string?)null,
+        });
     }
 
-    var result = await solver.SolveAsync(tempPath, hints: null, ctx.RequestAborted);
+    // No file — solve the last captured image (calibrate / idle / demo)
+    var lastImage = state.LastImagePath;
+    if (lastImage == null || !File.Exists(lastImage))
+    {
+        logger.LogWarning("Solve Now: no image available");
+        return Results.BadRequest(new { error = "No image available — capture one first" });
+    }
+
+    logger.LogInformation("Solve Now: solving {Image}", Path.GetFileName(lastImage));
+    var result = await solver.SolveAsync(lastImage, hints: null, ctx.RequestAborted);
     if (result.IsValid)
     {
-        state.UpdateResult(result, tempPath);
+        state.UpdateResult(result, lastImage);
         _ = ws.BroadcastSolve(result, hasImage: true);
         _ = ws.BroadcastStatus(opts.Value.Mode, "solved", onstep);
+        logger.LogInformation("Solve Now: solved RA={Ra:F4}° Dec={Dec:F4}°", result.RaDeg, result.DecDeg);
+    }
+    else
+    {
+        logger.LogWarning("Solve Now: no solution found for {Image}", Path.GetFileName(lastImage));
     }
 
     return Results.Ok(new
@@ -244,30 +277,64 @@ app.MapGet("/solve/image", (SolveState state) =>
 });
 
 // POST /system/shutdown — graceful shutdown (Linux only)
-app.MapPost("/system/shutdown", (IHostApplicationLifetime lifetime) =>
+app.MapPost("/system/shutdown", (ILogger<Program> logger) =>
 {
     if (!OperatingSystem.IsLinux())
         return Results.StatusCode(503);
 
-    lifetime.StopApplication();
+    _ = Task.Run(async () =>
+    {
+        await Task.Delay(1000);
+        await RunPrivilegedAsync("systemctl", "poweroff", logger);
+    });
+
     return Results.Ok(new { status = "shutting down" });
 });
 
 // POST /system/restart — graceful reboot (Linux only)
-app.MapPost("/system/restart", () =>
+app.MapPost("/system/restart", (ILogger<Program> logger) =>
 {
     if (!OperatingSystem.IsLinux())
         return Results.StatusCode(503);
 
-    // Schedule reboot then return response
     _ = Task.Run(async () =>
     {
         await Task.Delay(1000);
-        System.Diagnostics.Process.Start("sudo", "reboot");
+        await RunPrivilegedAsync("systemctl", "reboot", logger);
     });
 
     return Results.Ok(new { status = "restarting" });
 });
+
+static async Task RunPrivilegedAsync(string fileName, string args, ILogger logger)
+{
+    try
+    {
+        using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = args,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        })!;
+        await p.WaitForExitAsync();
+        if (p.ExitCode != 0)
+        {
+            var stderr = (await p.StandardError.ReadToEndAsync()).Trim();
+            logger.LogError("{Cmd} {Args} exited {Code}: {Stderr}", fileName, args, p.ExitCode, stderr);
+        }
+        else
+        {
+            logger.LogInformation("{Cmd} {Args} invoked successfully", fileName, args);
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to run {Cmd} {Args}", fileName, args);
+    }
+}
 
 // GET /system/update/check — cached result from startup check (no per-request network call)
 app.MapGet("/system/update/check", () => Results.Ok(updateState.ToResponse()));

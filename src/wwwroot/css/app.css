@@ -118,6 +118,21 @@ header h1 {
     line-height: 1;
 }
 
+#shutdown-btn {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    cursor: pointer;
+    padding: 0.25rem;
+    line-height: 1;
+    color: #c0392b;
+    opacity: 0.7;
+}
+
+#shutdown-btn:hover {
+    opacity: 1;
+}
+
 /* Main content */
 main {
     padding: 1rem;
@@ -371,6 +386,47 @@ details summary {
 
 .btn-secondary:hover {
     opacity: 0.85;
+}
+
+.btn-danger {
+    background: #c0392b;
+    color: #fff;
+    border: 1px solid #a02516;
+    border-radius: 6px;
+    padding: 0.5rem 1.5rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    min-height: 36px;
+}
+
+.btn-danger:hover {
+    opacity: 0.85;
+}
+
+#power-dialog {
+    background: var(--bg-alt);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    min-width: 280px;
+    margin: auto;
+}
+
+#power-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.5);
+}
+
+#power-dialog p {
+    margin-bottom: 1rem;
+    font-size: 0.95rem;
+}
+
+.dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
 }
 
 .settings-msg {

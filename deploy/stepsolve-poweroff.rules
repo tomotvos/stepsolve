@@ -1,0 +1,11 @@
+// Allow the stepsolve service user to power off and reboot the system
+// without authentication. Scoped tightly to that user and those two actions.
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.freedesktop.login1.power-off" ||
+         action.id == "org.freedesktop.login1.power-off-multiple-sessions" ||
+         action.id == "org.freedesktop.login1.reboot" ||
+         action.id == "org.freedesktop.login1.reboot-multiple-sessions") &&
+        subject.user == "stepsolve") {
+        return polkit.Result.YES;
+    }
+});

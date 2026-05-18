@@ -41,10 +41,17 @@ public sealed class StepSolveService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("StepSolve service starting, mode={Mode}", CurrentMode);
+        var prevMode = "";
 
         while (!stoppingToken.IsCancellationRequested)
         {
             var mode = CurrentMode;
+
+            if (mode != prevMode)
+            {
+                prevMode = mode;
+                _ = _ws.BroadcastStatus(mode, _state.Current.State, _onstep);
+            }
 
             try
             {
@@ -55,6 +62,9 @@ public sealed class StepSolveService : BackgroundService
                         break;
                     case "demo":
                         await RunDemoCycle(stoppingToken);
+                        break;
+                    case "calibrate":
+                        await RunCalibrateCycle(stoppingToken);
                         break;
                     default: // idle
                         break;
@@ -158,6 +168,33 @@ public sealed class StepSolveService : BackgroundService
             _ = _ws.BroadcastStatus(CurrentMode, "idle", _onstep);
             _logger.LogDebug("Demo solve returned no result for {Image}", Path.GetFileName(imagePath));
         }
+    }
+
+    // Captures frames continuously for focus/framing; no solver involved.
+    // No-op on non-Linux since there is no real camera there.
+    private async Task RunCalibrateCycle(CancellationToken ct)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            _state.SetState("idle");
+            return;
+        }
+
+        _state.SetState("capturing");
+        _ = _ws.BroadcastStatus(CurrentMode, "capturing", _onstep);
+        var imagePath = await _camera.CaptureAsync(ct);
+
+        if (imagePath == null)
+        {
+            _logger.LogDebug("Calibrate: no image captured");
+            _state.SetState("idle");
+            return;
+        }
+
+        _state.SetImagePath(imagePath);
+        _state.SetState("idle");
+        _ = _ws.BroadcastImage("/solve/image");
+        _logger.LogDebug("Calibrate frame captured: {Path}", imagePath);
     }
 
     private string CurrentMode =>

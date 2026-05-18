@@ -30,7 +30,7 @@ Always pass `-p:IsQuestionBuildEnabled=false` to `dotnet test`.
 
 Single-process Kestrel app. All components run in-process as singletons; no queues or separate workers.
 
-**Main loop** — `StepSolveService` (BackgroundService) reads `StepSolve:Mode` from `IConfiguration` on every iteration (hot-reload safe). In `solve` mode it calls `ICameraCapture` → `ISolver` → `SolveState` → `OnStepClient`. In `demo` mode it skips the camera and picks a random image from `wwwroot/demo/`.
+**Main loop** — `StepSolveService` (BackgroundService) reads `StepSolve:Mode` from `IConfiguration` on every iteration (hot-reload safe). In `solve` mode it calls `ICameraCapture` → `ISolver` → `SolveState` → `OnStepClient`. In `demo` mode it skips the camera and picks a random image from `wwwroot/demo/`. In `calibrate` mode it captures continuously and broadcasts each frame to the dashboard (no solver call, no RA/Dec update); no-op on non-Linux. Broadcasts a status update whenever the mode changes.
 
 **Solver routing** — `SolverRouter` (registered as `ISolver`) reads `Solver:Backend` at call time and delegates to `AstrometrySolver`, `Tetra3Solver`, or `CedarSolver`. No restart needed to switch backends.
 
@@ -61,10 +61,10 @@ Config sections: `StepSolve`, `Solver`, `Camera`, `OnStep`. All use `IOptionsMon
 | POST | `/mode` | Change mode; body `{"mode":"solve"}` or `?mode=solve` |
 | GET | `/settings` | All configuration sections |
 | POST | `/settings` | Validate, apply, and persist settings via `SettingsService` |
-| POST | `/solve` | On-demand solve: `?demo=1` for fake result, or multipart image upload |
-| GET | `/solve/image` | Last successfully solved image (JPEG) |
-| POST | `/system/shutdown` | Graceful stop (Linux only) |
-| POST | `/system/restart` | `sudo reboot` after 1 s delay (Linux only) |
+| POST | `/solve` | On-demand solve: no body → solve last captured image; `?demo=1` → fake result; multipart → solve uploaded file. Disabled in dashboard while in `solve` mode. |
+| GET | `/solve/image` | Last captured or solved image (JPEG) |
+| POST | `/system/shutdown` | `systemctl poweroff` after 1 s delay (Linux only; requires polkit rule) |
+| POST | `/system/restart` | `systemctl reboot` after 1 s delay (Linux only; requires polkit rule) |
 | GET | `/ws` | WebSocket — real-time solve/status/log stream |
 
 ## Key Files

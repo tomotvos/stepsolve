@@ -68,6 +68,12 @@ echo "==> Configuring sudoers for OTA restart"
 echo "stepsolve ALL=(ALL) NOPASSWD: /bin/systemctl restart stepsolve" > "$SUDOERS_FILE"
 chmod 440 "$SUDOERS_FILE"
 
+# ── Polkit rule for poweroff/reboot from the dashboard ───────────────────────
+echo "==> Installing polkit rule for poweroff/reboot"
+install -m 644 "$SCRIPT_DIR/stepsolve-poweroff.rules" /etc/polkit-1/rules.d/50-stepsolve-poweroff.rules
+# polkitd picks up new rule files automatically; restart to be safe on older builds
+systemctl try-restart polkit 2>/dev/null || true
+
 # ── Avahi / mDNS ─────────────────────────────────────────────────────────────
 if command -v avahi-daemon &>/dev/null; then
     echo "==> Installing Avahi service files"
