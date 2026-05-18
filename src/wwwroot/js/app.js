@@ -144,6 +144,9 @@
         if (!mode) return;
         var lower = mode.toLowerCase();
         els.modeSelect.value = lower;
+        var inSolveLoop = lower === 'solve';
+        els.solveNowBtn.disabled = inSolveLoop;
+        els.solveNowBtn.title = inSolveLoop ? 'Solve loop is already running' : '';
     }
 
     function updateOnStep(onstep) {
@@ -364,13 +367,17 @@
 
     els.solveNowBtn.addEventListener('click', function () {
         els.solveNowBtn.disabled = true;
-        fetch('/solve?demo=1', { method: 'POST' })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (data && data.ra != null) updateSolveDisplay(data);
+        fetch('/solve', { method: 'POST' })
+            .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+            .then(function (result) {
+                if (result.ok && result.data && result.data.ra != null) {
+                    updateSolveDisplay(result.data);
+                }
             })
             .catch(function () { /* ignore */ })
-            .finally(function () { els.solveNowBtn.disabled = false; });
+            .finally(function () {
+                els.solveNowBtn.disabled = els.modeSelect.value === 'solve';
+            });
     });
 
     // -- Settings panel --

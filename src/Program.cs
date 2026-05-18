@@ -200,23 +200,47 @@ app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, 
     }
 
     // Image upload solve
-    if (!ctx.Request.HasFormContentType || ctx.Request.Form.Files.Count == 0)
-        return Results.BadRequest(new { error = "Provide an image file or use ?demo=1" });
-
-    var file = ctx.Request.Form.Files[0];
-    var tempDir = Path.Combine(AppContext.BaseDirectory, "images");
-    Directory.CreateDirectory(tempDir);
-    var tempPath = Path.Combine(tempDir, $"upload_{DateTimeOffset.UtcNow.Ticks}.jpg");
-
-    await using (var stream = File.Create(tempPath))
+    if (ctx.Request.HasFormContentType && ctx.Request.Form.Files.Count > 0)
     {
-        await file.CopyToAsync(stream, ctx.RequestAborted);
+        var file = ctx.Request.Form.Files[0];
+        var tempDir = Path.Combine(AppContext.BaseDirectory, "images");
+        Directory.CreateDirectory(tempDir);
+        var tempPath = Path.Combine(tempDir, $"upload_{DateTimeOffset.UtcNow.Ticks}.jpg");
+
+        await using (var stream = File.Create(tempPath))
+        {
+            await file.CopyToAsync(stream, ctx.RequestAborted);
+        }
+
+        var uploadResult = await solver.SolveAsync(tempPath, hints: null, ctx.RequestAborted);
+        if (uploadResult.IsValid)
+        {
+            state.UpdateResult(uploadResult, tempPath);
+            _ = ws.BroadcastSolve(uploadResult, hasImage: true);
+            _ = ws.BroadcastStatus(opts.Value.Mode, "solved", onstep);
+        }
+
+        return Results.Ok(new
+        {
+            ra = uploadResult.RaDeg,
+            dec = uploadResult.DecDeg,
+            confidence = uploadResult.Confidence,
+            solver = uploadResult.SolverName,
+            solveTimeMs = uploadResult.SolveTime.TotalMilliseconds,
+            valid = uploadResult.IsValid,
+            imageUrl = uploadResult.IsValid ? "/solve/image" : (string?)null,
+        });
     }
 
-    var result = await solver.SolveAsync(tempPath, hints: null, ctx.RequestAborted);
+    // No file — solve the last captured image (calibrate / idle / demo)
+    var lastImage = state.LastImagePath;
+    if (lastImage == null || !File.Exists(lastImage))
+        return Results.BadRequest(new { error = "No image available — capture one first" });
+
+    var result = await solver.SolveAsync(lastImage, hints: null, ctx.RequestAborted);
     if (result.IsValid)
     {
-        state.UpdateResult(result, tempPath);
+        state.UpdateResult(result, lastImage);
         _ = ws.BroadcastSolve(result, hasImage: true);
         _ = ws.BroadcastStatus(opts.Value.Mode, "solved", onstep);
     }
