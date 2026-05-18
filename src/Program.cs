@@ -172,7 +172,7 @@ app.MapPost("/settings", async (HttpContext ctx, SettingsService settingsSvc) =>
 });
 
 // POST /solve — on-demand solve: demo pulse (?demo=1) or uploaded image
-app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, WebSocketBroadcaster ws, OnStepClient onstep, IOptions<StepSolveOptions> opts) =>
+app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, WebSocketBroadcaster ws, OnStepClient onstep, IOptions<StepSolveOptions> opts, ILogger<Program> logger) =>
 {
     if (ctx.Request.Query.ContainsKey("demo"))
     {
@@ -235,14 +235,23 @@ app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, 
     // No file — solve the last captured image (calibrate / idle / demo)
     var lastImage = state.LastImagePath;
     if (lastImage == null || !File.Exists(lastImage))
+    {
+        logger.LogWarning("Solve Now: no image available");
         return Results.BadRequest(new { error = "No image available — capture one first" });
+    }
 
+    logger.LogInformation("Solve Now: solving {Image}", Path.GetFileName(lastImage));
     var result = await solver.SolveAsync(lastImage, hints: null, ctx.RequestAborted);
     if (result.IsValid)
     {
         state.UpdateResult(result, lastImage);
         _ = ws.BroadcastSolve(result, hasImage: true);
         _ = ws.BroadcastStatus(opts.Value.Mode, "solved", onstep);
+        logger.LogInformation("Solve Now: solved RA={Ra:F4}° Dec={Dec:F4}°", result.RaDeg, result.DecDeg);
+    }
+    else
+    {
+        logger.LogWarning("Solve Now: no solution found for {Image}", Path.GetFileName(lastImage));
     }
 
     return Results.Ok(new

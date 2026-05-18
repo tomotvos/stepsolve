@@ -372,9 +372,11 @@
             .then(function (result) {
                 if (result.ok && result.data && result.data.ra != null) {
                     updateSolveDisplay(result.data);
+                } else if (!result.ok) {
+                    appendLog('WARNING', result.data && result.data.error ? result.data.error : 'Solve Now failed');
                 }
             })
-            .catch(function () { /* ignore */ })
+            .catch(function () { appendLog('ERROR', 'Solve Now: network error'); })
             .finally(function () {
                 els.solveNowBtn.disabled = els.modeSelect.value === 'solve';
             });
