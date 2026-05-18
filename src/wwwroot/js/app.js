@@ -306,25 +306,11 @@
 
     // -- User interactions --
 
-    var shutdownArmed = false;
-    var shutdownTimer = null;
-
     els.shutdownBtn.addEventListener('click', function () {
-        if (!shutdownArmed) {
-            shutdownArmed = true;
-            els.shutdownBtn.classList.add('armed');
-            els.shutdownBtn.title = 'Click again to confirm shutdown';
-            shutdownTimer = setTimeout(function () {
-                shutdownArmed = false;
-                els.shutdownBtn.classList.remove('armed');
-                els.shutdownBtn.title = '';
-            }, 3000);
-        } else {
-            clearTimeout(shutdownTimer);
-            els.shutdownBtn.disabled = true;
-            fetch('/system/shutdown', { method: 'POST' })
-                .catch(function () { /* connection drop is expected */ });
-        }
+        if (!confirm('Shut down the Pi?')) return;
+        els.shutdownBtn.disabled = true;
+        fetch('/system/shutdown', { method: 'POST' })
+            .catch(function () { /* connection drop is expected */ });
     });
 
     els.themeToggle.addEventListener('click', function () {
