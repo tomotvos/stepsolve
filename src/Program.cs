@@ -244,12 +244,17 @@ app.MapGet("/solve/image", (SolveState state) =>
 });
 
 // POST /system/shutdown — graceful shutdown (Linux only)
-app.MapPost("/system/shutdown", (IHostApplicationLifetime lifetime) =>
+app.MapPost("/system/shutdown", () =>
 {
     if (!OperatingSystem.IsLinux())
         return Results.StatusCode(503);
 
-    lifetime.StopApplication();
+    _ = Task.Run(async () =>
+    {
+        await Task.Delay(1000);
+        System.Diagnostics.Process.Start("sudo", "shutdown -h now");
+    });
+
     return Results.Ok(new { status = "shutting down" });
 });
 
