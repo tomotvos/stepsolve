@@ -185,6 +185,7 @@ public sealed class StepSolveService : BackgroundService
         }
 
         _state.SetImagePath(imagePath);
+        _state.SetState("idle");
         _ = _ws.BroadcastImage("/solve/image");
         _logger.LogDebug("Calibrate frame captured: {Path}", imagePath);
     }
