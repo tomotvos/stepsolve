@@ -252,7 +252,7 @@ app.MapPost("/system/shutdown", () =>
     _ = Task.Run(async () =>
     {
         await Task.Delay(1000);
-        System.Diagnostics.Process.Start("sudo", "shutdown -h now");
+        System.Diagnostics.Process.Start("systemctl", "poweroff");
     });
 
     return Results.Ok(new { status = "shutting down" });
@@ -268,7 +268,7 @@ app.MapPost("/system/restart", () =>
     _ = Task.Run(async () =>
     {
         await Task.Delay(1000);
-        System.Diagnostics.Process.Start("sudo", "reboot");
+        System.Diagnostics.Process.Start("systemctl", "reboot");
     });
 
     return Results.Ok(new { status = "restarting" });
