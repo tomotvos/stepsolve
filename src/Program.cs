@@ -244,7 +244,7 @@ app.MapGet("/solve/image", (SolveState state) =>
 });
 
 // POST /system/shutdown — graceful shutdown (Linux only)
-app.MapPost("/system/shutdown", () =>
+app.MapPost("/system/shutdown", (ILogger<Program> logger) =>
 {
     if (!OperatingSystem.IsLinux())
         return Results.StatusCode(503);
@@ -252,27 +252,56 @@ app.MapPost("/system/shutdown", () =>
     _ = Task.Run(async () =>
     {
         await Task.Delay(1000);
-        System.Diagnostics.Process.Start("systemctl", "poweroff");
+        await RunPrivilegedAsync("systemctl", "poweroff", logger);
     });
 
     return Results.Ok(new { status = "shutting down" });
 });
 
 // POST /system/restart — graceful reboot (Linux only)
-app.MapPost("/system/restart", () =>
+app.MapPost("/system/restart", (ILogger<Program> logger) =>
 {
     if (!OperatingSystem.IsLinux())
         return Results.StatusCode(503);
 
-    // Schedule reboot then return response
     _ = Task.Run(async () =>
     {
         await Task.Delay(1000);
-        System.Diagnostics.Process.Start("systemctl", "reboot");
+        await RunPrivilegedAsync("systemctl", "reboot", logger);
     });
 
     return Results.Ok(new { status = "restarting" });
 });
+
+static async Task RunPrivilegedAsync(string fileName, string args, ILogger logger)
+{
+    try
+    {
+        using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = args,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        })!;
+        await p.WaitForExitAsync();
+        if (p.ExitCode != 0)
+        {
+            var stderr = (await p.StandardError.ReadToEndAsync()).Trim();
+            logger.LogError("{Cmd} {Args} exited {Code}: {Stderr}", fileName, args, p.ExitCode, stderr);
+        }
+        else
+        {
+            logger.LogInformation("{Cmd} {Args} invoked successfully", fileName, args);
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to run {Cmd} {Args}", fileName, args);
+    }
+}
 
 // GET /system/update/check — cached result from startup check (no per-request network call)
 app.MapGet("/system/update/check", () => Results.Ok(updateState.ToResponse()));
