@@ -411,6 +411,7 @@ details summary {
     border-radius: 8px;
     padding: 1.25rem 1.5rem;
     min-width: 280px;
+    margin: auto;
 }
 
 #power-dialog::backdrop {
