@@ -91,6 +91,16 @@ public sealed class WebSocketBroadcaster
         });
 
     /// <summary>
+    /// Broadcast a newly captured calibrate frame so the dashboard refreshes the image preview.
+    /// </summary>
+    public Task BroadcastImage(string imageUrl) =>
+        Broadcast(new
+        {
+            type = "image",
+            imageUrl,
+        });
+
+    /// <summary>
     /// Broadcast a log entry to all connected clients.
     /// </summary>
     public Task BroadcastLog(string level, string message) =>

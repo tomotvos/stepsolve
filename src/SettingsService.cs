@@ -22,7 +22,7 @@ public sealed class SettingsService
 
     private static readonly HashSet<string> ValidModes = new(StringComparer.OrdinalIgnoreCase)
     {
-        "solve", "demo", "idle"
+        "solve", "demo", "idle", "calibrate"
     };
 
     private static readonly HashSet<string> ValidSyncModes = new(StringComparer.OrdinalIgnoreCase)
@@ -78,7 +78,7 @@ public sealed class SettingsService
 
                 var error = fullKey switch
                 {
-                    "StepSolve:Mode" => ValidModes.Contains(value) ? null : "Mode must be solve, demo, or idle",
+                    "StepSolve:Mode" => ValidModes.Contains(value) ? null : "Mode must be solve, demo, idle, or calibrate",
                     "StepSolve:WebPort" => ValidPort(value),
                     "StepSolve:Lx200Port" => ValidPort(value),
                     "Solver:Backend" => ValidBackends.Contains(value) ? null : "Backend must be astrometry, cedar, or tetra3",

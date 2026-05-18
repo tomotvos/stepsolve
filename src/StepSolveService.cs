@@ -56,6 +56,9 @@ public sealed class StepSolveService : BackgroundService
                     case "demo":
                         await RunDemoCycle(stoppingToken);
                         break;
+                    case "calibrate":
+                        await RunCalibrateCycle(stoppingToken);
+                        break;
                     default: // idle
                         break;
                 }
@@ -158,6 +161,32 @@ public sealed class StepSolveService : BackgroundService
             _ = _ws.BroadcastStatus(CurrentMode, "idle", _onstep);
             _logger.LogDebug("Demo solve returned no result for {Image}", Path.GetFileName(imagePath));
         }
+    }
+
+    // Captures frames continuously for focus/framing; no solver involved.
+    // No-op on non-Linux since there is no real camera there.
+    private async Task RunCalibrateCycle(CancellationToken ct)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            _state.SetState("idle");
+            return;
+        }
+
+        _state.SetState("capturing");
+        _ = _ws.BroadcastStatus(CurrentMode, "capturing", _onstep);
+        var imagePath = await _camera.CaptureAsync(ct);
+
+        if (imagePath == null)
+        {
+            _logger.LogDebug("Calibrate: no image captured");
+            _state.SetState("idle");
+            return;
+        }
+
+        _state.SetImagePath(imagePath);
+        _ = _ws.BroadcastImage("/solve/image");
+        _logger.LogDebug("Calibrate frame captured: {Path}", imagePath);
     }
 
     private string CurrentMode =>

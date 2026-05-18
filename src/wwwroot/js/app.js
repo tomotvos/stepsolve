@@ -245,6 +245,9 @@
                         updateMode(msg.mode);
                         updateOnStep(msg.onstep);
                         break;
+                    case 'image':
+                        refreshImagePreview();
+                        break;
                     case 'log':
                         appendLog(msg.level, msg.message, msg.timestamp);
                         break;
