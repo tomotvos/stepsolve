@@ -41,10 +41,17 @@ public sealed class StepSolveService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("StepSolve service starting, mode={Mode}", CurrentMode);
+        var prevMode = "";
 
         while (!stoppingToken.IsCancellationRequested)
         {
             var mode = CurrentMode;
+
+            if (mode != prevMode)
+            {
+                prevMode = mode;
+                _ = _ws.BroadcastStatus(mode, _state.Current.State, _onstep);
+            }
 
             try
             {
