@@ -19,6 +19,10 @@
         modeSelect: document.getElementById('mode-select'),
         themeToggle: document.getElementById('theme-toggle'),
         shutdownBtn: document.getElementById('shutdown-btn'),
+        powerDialog: document.getElementById('power-dialog'),
+        powerCancel: document.getElementById('power-cancel'),
+        powerRestart: document.getElementById('power-restart'),
+        powerShutdown: document.getElementById('power-shutdown'),
         solveNowBtn: document.getElementById('solve-now-btn'),
         onstepStatus: document.getElementById('onstep-status'),
         onstepLastSync: document.getElementById('onstep-last-sync'),
@@ -307,9 +311,24 @@
     // -- User interactions --
 
     els.shutdownBtn.addEventListener('click', function () {
-        if (!confirm('Shut down the Pi?')) return;
+        els.powerDialog.showModal();
+    });
+
+    els.powerCancel.addEventListener('click', function () {
+        els.powerDialog.close();
+    });
+
+    els.powerShutdown.addEventListener('click', function () {
+        els.powerDialog.close();
         els.shutdownBtn.disabled = true;
         fetch('/system/shutdown', { method: 'POST' })
+            .catch(function () { /* connection drop is expected */ });
+    });
+
+    els.powerRestart.addEventListener('click', function () {
+        els.powerDialog.close();
+        els.shutdownBtn.disabled = true;
+        fetch('/system/restart', { method: 'POST' })
             .catch(function () { /* connection drop is expected */ });
     });
 

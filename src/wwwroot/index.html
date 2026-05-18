@@ -177,6 +177,16 @@
             <div id="log-container" role="log" aria-live="polite" aria-label="Application logs"></div>
         </details>
 
+        <!-- Shutdown / restart dialog -->
+        <dialog id="power-dialog">
+            <p>Shutdown the StepSolve device?</p>
+            <div class="dialog-actions">
+                <button id="power-cancel" class="btn-secondary">Cancel</button>
+                <button id="power-restart" class="btn-secondary">Restart</button>
+                <button id="power-shutdown" class="btn-danger">Shutdown</button>
+            </div>
+        </dialog>
+
         <!-- Connection indicator -->
         <div id="connection-status" class="connection-bar">
             <span id="ws-indicator" class="indicator disconnected"></span>

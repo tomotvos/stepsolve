@@ -388,6 +388,46 @@ details summary {
     opacity: 0.85;
 }
 
+.btn-danger {
+    background: #c0392b;
+    color: #fff;
+    border: 1px solid #a02516;
+    border-radius: 6px;
+    padding: 0.5rem 1.5rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    min-height: 36px;
+}
+
+.btn-danger:hover {
+    opacity: 0.85;
+}
+
+#power-dialog {
+    background: var(--bg-alt);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    min-width: 280px;
+}
+
+#power-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.5);
+}
+
+#power-dialog p {
+    margin-bottom: 1rem;
+    font-size: 0.95rem;
+}
+
+.dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
 .settings-msg {
     font-size: 0.8rem;
 }
