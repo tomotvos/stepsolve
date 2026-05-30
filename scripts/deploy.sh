@@ -7,7 +7,7 @@
 # Override the Pi host: PI_HOST=pi@192.168.1.50 bash scripts/deploy.sh
 set -euo pipefail
 
-PI_HOST="${PI_HOST:-pi@stepsolve.local}"
+PI_HOST="${PI_HOST:-pi@rpiskysolve.local}"
 PUBLISH="src/bin/Release/net10.0/linux-arm64/publish"
 
 echo "==> Building for linux-arm64"
