@@ -108,6 +108,7 @@ header h1 {
 .badge-solving    { background: var(--badge-solving); }
 .badge-solved     { background: var(--badge-solved); }
 .badge-error      { background: var(--badge-error); }
+.badge-update     { background: var(--badge-solved); color: #0a1a0a; text-decoration: none; cursor: pointer; }
 
 #theme-toggle {
     background: none;

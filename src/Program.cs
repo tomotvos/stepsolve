@@ -78,7 +78,8 @@ var updateState = new UpdateState(currentVersion);
 if (currentVersion != "dev")
 {
     var httpFactory = app.Services.GetRequiredService<IHttpClientFactory>();
-    _ = updateState.CheckAsync(httpFactory.CreateClient());
+    var updateLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("StepSolve.Update");
+    _ = updateState.CheckAsync(httpFactory.CreateClient(), updateLogger);
 }
 
 // GET /status — current solve state and configuration
@@ -418,7 +419,7 @@ sealed class UpdateState(string currentVersion)
 
     public UpdateResponse ToResponse() => _response;
 
-    public async Task CheckAsync(HttpClient client)
+    public async Task CheckAsync(HttpClient client, ILogger? logger = null)
     {
         const string ApiUrl = "https://api.github.com/repos/tomotvos/stepsolve/releases/latest";
         try
@@ -445,10 +446,15 @@ sealed class UpdateState(string currentVersion)
 
             var hasUpdate = downloadUrl != null && IsNewerVersion(latest, currentVersion);
             _response = new UpdateResponse(currentVersion, latest, hasUpdate, downloadUrl);
+
+            if (hasUpdate)
+                logger?.LogInformation("Update available: {Latest} (running {Current})", latest, currentVersion);
+            else
+                logger?.LogInformation("Software is up to date ({Current})", currentVersion);
         }
-        catch
+        catch (Exception ex)
         {
-            // Leave response as default (hasUpdate: false) if check fails (no internet, etc.)
+            logger?.LogWarning("Update check failed: {Message}", ex.Message);
         }
     }
 

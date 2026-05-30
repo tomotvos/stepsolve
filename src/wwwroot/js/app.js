@@ -56,6 +56,7 @@
         settingsMsg: document.getElementById('settings-msg'),
         // Update section
         updateSection: document.getElementById('update-section'),
+        updateBadge: document.getElementById('update-badge'),
         updateCurrent: document.getElementById('update-current'),
         updateLatest: document.getElementById('update-latest'),
         updateBtn: document.getElementById('update-btn'),
@@ -239,6 +240,7 @@
             state.wsRetries = 0;
             setConnectionStatus(true);
             stopPolling();
+            loadUpdateStatus();
         };
 
         state.ws.onmessage = function (e) {
@@ -477,20 +479,14 @@
                     els.updateLatest.textContent = data.latestVersion + ' ✓ available';
                     els.updateLatest.className = 'update-available';
                     els.updateBtn.style.display = '';
-                    // Also surface a badge on the section summary
-                    var summary = els.updateSection.querySelector('summary');
-                    if (summary && !summary.querySelector('.update-dot')) {
-                        var dot = document.createElement('span');
-                        dot.className = 'update-dot';
-                        dot.textContent = ' •';
-                        summary.appendChild(dot);
-                    }
+                    els.updateBadge.style.display = '';
                 } else {
                     els.updateLatest.textContent = data.latestVersion
                         ? data.latestVersion + ' (up to date)'
                         : (data.currentVersion === 'dev' ? 'dev build' : 'up to date');
                     els.updateLatest.className = '';
                     els.updateBtn.style.display = 'none';
+                    els.updateBadge.style.display = 'none';
                 }
             })
             .catch(function () {
@@ -516,11 +512,16 @@
             });
     });
 
-    // Load update status when the section is opened
+    // Header badge: open the section then scroll to it
+    els.updateBadge.addEventListener('click', function (e) {
+        e.preventDefault();
+        els.updateSection.open = true;
+        els.updateSection.scrollIntoView({ behavior: 'smooth' });
+    });
+
+    // Reload update status each time the section is opened
     els.updateSection.addEventListener('toggle', function () {
-        if (els.updateSection.open && els.updateCurrent.textContent === '--') {
-            loadUpdateStatus();
-        }
+        if (els.updateSection.open) loadUpdateStatus();
     });
 
     // -- Init --

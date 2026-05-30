@@ -17,6 +17,8 @@ echo "==> Preparing install directory on Pi"
 ssh "$PI_HOST" 'sudo mkdir -p /usr/local/lib/stepsolve && sudo chown -R "$(id -un)":"$(id -gn)" /usr/local/lib/stepsolve'
 
 echo "==> Syncing to $PI_HOST"
+# Dev deploys never carry a version tag — release.sh handles versioned builds.
+rm -f "$PUBLISH/version.txt"
 rsync -az --progress "$PUBLISH/"  "$PI_HOST:/usr/local/lib/stepsolve/"
 rsync -az scripts/                "$PI_HOST:/usr/local/lib/stepsolve/scripts/"
 rsync -az deploy/                 "$PI_HOST:/usr/local/lib/stepsolve/deploy/"
