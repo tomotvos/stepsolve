@@ -443,13 +443,23 @@ sealed class UpdateState(string currentVersion)
                 }
             }
 
-            var hasUpdate = latest != currentVersion && downloadUrl != null;
+            var hasUpdate = downloadUrl != null && IsNewerVersion(latest, currentVersion);
             _response = new UpdateResponse(currentVersion, latest, hasUpdate, downloadUrl);
         }
         catch
         {
             // Leave response as default (hasUpdate: false) if check fails (no internet, etc.)
         }
+    }
+
+    internal static bool IsNewerVersion(string? candidate, string current)
+    {
+        static Version? Parse(string? s) =>
+            System.Version.TryParse(s?.TrimStart('v'), out var v) ? v : null;
+
+        var c = Parse(candidate);
+        var cur = Parse(current);
+        return c != null && cur != null && c > cur;
     }
 }
 
