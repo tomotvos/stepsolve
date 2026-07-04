@@ -113,7 +113,125 @@ This builds, rsyncs, and restarts the service in ~30 seconds.
 
 ---
 
-## 7. Configuration Reference
+## 7. Wi-Fi Hotspot (Field Use)
+
+The installer sets up automatic switching between known Wi-Fi networks and a
+self-hosted hotspot, so `stepsolve.local` is always reachable — at home, at
+a site with only your phone available, or fully in the field with neither.
+
+A systemd timer (`stepsolve-hotspot-switch.timer`) checks every 30 seconds
+whether any Wi-Fi network the Pi already knows about is in range, and
+activates the highest-priority one it finds — falling back to the Pi's own
+hotspot only if none are. The recommended three-tier setup, in preference
+order:
+
+1. **Home Wi-Fi** (priority `10`) — set up automatically by Raspberry Pi
+   Imager when you flashed the SD card. Used whenever you're close enough
+   to home to reach it (backyard, driveway).
+2. **Phone hotspot** (priority `5`) — a fallback network you register once
+   (see below), e.g. your phone's Personal/Mobile Hotspot. Used at sites
+   away from home where you'd rather just tap your phone's hotspot toggle
+   than reconfigure anything.
+3. **The Pi's own hotspot** (fixed lowest priority, only used when nothing
+   else is in range) — for fully remote sites, or when your phone's
+   hotspot feature is unavailable (carrier restrictions, battery saving,
+   etc.). SSID `StepSolve`, password `stepsolve1234` by default.
+
+Connect a phone or laptop to whichever network is active, then browse to
+`http://stepsolve.local:5001` or connect SkySafari to `stepsolve.local:5002`.
+
+### Registering a phone hotspot fallback
+
+Provide `PHONE_HOTSPOT_SSID` and `PHONE_HOTSPOT_PASSWORD` (minimum 8
+characters) when running the installer, and it's registered as tier 2
+automatically, at priority `5` by default:
+
+```bash
+sudo env HOTSPOT_SSID=StepSolve HOTSPOT_PASSWORD=stepsolve1234 \
+    PHONE_HOTSPOT_SSID="My iPhone" PHONE_HOTSPOT_PASSWORD=mypassword1 \
+    bash deploy/install.sh
+```
+
+To add or change it after install without re-running the whole installer:
+
+```bash
+sudo env PHONE_HOTSPOT_SSID="My iPhone" PHONE_HOTSPOT_PASSWORD=mypassword1 \
+    bash /usr/local/lib/stepsolve/deploy/hotspot/setup-hotspot.sh
+```
+
+Override the priority with `PHONE_HOTSPOT_PRIORITY` (default `5`) — keep it
+below your home network's priority (`10`) so home is always preferred when
+both are in range.
+
+This only *registers* the network — you still turn your phone's hotspot on
+when you actually need it in the field; the Pi will pick it up on its next
+30-second scan.
+
+**Any other known network** (a friend's house, a star party's shared
+Wi-Fi) can be added the same way NetworkManager always adds networks, and
+the auto-switch will pick it up automatically with no StepSolve-specific
+config:
+
+```bash
+ssh pi@stepsolve.local
+sudo nmcli device wifi connect "SomeOtherNetwork" password "its-password" ifname wlan0
+sudo nmcli connection modify "SomeOtherNetwork" connection.autoconnect-priority 3
+```
+
+List your saved networks and their current priority with:
+
+```bash
+nmcli -f NAME,TYPE connection show
+nmcli -g connection.autoconnect-priority connection show "<name>"
+```
+
+### Forcing hotspot mode for testing at home
+
+Since auto mode only creates the Pi's own hotspot when no known network is
+in range, you can't trigger it just by being at home. Use the installed
+`stepsolve-hotspot` command to override:
+
+```bash
+sudo stepsolve-hotspot force-hotspot   # always hotspot, ignore known networks
+sudo stepsolve-hotspot force-client    # only ever try known networks, never hotspot
+sudo stepsolve-hotspot auto            # back to automatic switching (default)
+sudo stepsolve-hotspot status          # show current mode + active connection
+```
+
+The override is re-applied every 30 seconds by the timer, so it holds even
+if NetworkManager tries to reconnect a known network in the background —
+expect at most one 30-second flicker back to auto behavior before it
+self-corrects.
+
+**Changing the Pi's own hotspot SSID/password:** set `HOTSPOT_SSID` and
+`HOTSPOT_PASSWORD` (minimum 8 characters) before running the installer:
+
+```bash
+sudo env HOTSPOT_SSID=MyScope HOTSPOT_PASSWORD=mypassword1 bash deploy/install.sh
+```
+
+To change it after install without re-running the whole installer:
+
+```bash
+sudo env HOTSPOT_SSID=MyScope HOTSPOT_PASSWORD=mypassword1 \
+    bash /usr/local/lib/stepsolve/deploy/hotspot/setup-hotspot.sh
+```
+
+> Use `sudo env VAR=value command`, not `VAR=value sudo command` — sudo
+> resets the environment by default, so variables set *before* `sudo` are
+> silently dropped. Placing them after `env` (which sudo runs as root)
+> guarantees they reach the script.
+
+**Troubleshooting:**
+
+```bash
+journalctl -t stepsolve-hotspot-switch -f
+systemctl status stepsolve-hotspot-switch.timer
+```
+
+---
+
+## 8. Configuration Reference
 
 Key settings that differ from Mac development defaults:
 
@@ -174,7 +292,7 @@ Open the dashboard, go to **Software Update**, and click **Update now** if a new
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 ```bash
 # View live logs
