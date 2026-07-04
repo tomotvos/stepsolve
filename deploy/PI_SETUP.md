@@ -125,9 +125,11 @@ activates the highest-priority one it finds — falling back to the Pi's own
 hotspot only if none are. The recommended three-tier setup, in preference
 order:
 
-1. **Home Wi-Fi** (priority `10`) — set up automatically by Raspberry Pi
-   Imager when you flashed the SD card. Used whenever you're close enough
-   to home to reach it (backyard, driveway).
+1. **Home Wi-Fi** (priority `10`) — any Wi-Fi network already saved on the
+   Pi (e.g. the home network set up via Raspberry Pi Imager when you
+   flashed the SD card) is automatically bumped to priority `10` by the
+   installer, so it outranks the phone fallback below. Used whenever
+   you're close enough to home to reach it (backyard, driveway).
 2. **Phone hotspot** (priority `5`) — a fallback network you register once
    (see below), e.g. your phone's Personal/Mobile Hotspot. Used at sites
    away from home where you'd rather just tap your phone's hotspot toggle
