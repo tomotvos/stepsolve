@@ -86,6 +86,29 @@ else
     echo "    Install with: sudo apt-get install -y avahi-daemon"
 fi
 
+# ── Wi-Fi Hotspot / Auto-switch ──────────────────────────────────────────────
+if command -v nmcli &>/dev/null; then
+    echo "==> Setting up Wi-Fi hotspot profile"
+    HOTSPOT_SSID="${HOTSPOT_SSID:-StepSolve}" \
+    HOTSPOT_PASSWORD="${HOTSPOT_PASSWORD:-stepsolve1234}" \
+    PHONE_HOTSPOT_SSID="${PHONE_HOTSPOT_SSID:-}" \
+    PHONE_HOTSPOT_PASSWORD="${PHONE_HOTSPOT_PASSWORD:-}" \
+    PHONE_HOTSPOT_PRIORITY="${PHONE_HOTSPOT_PRIORITY:-5}" \
+        bash "$SCRIPT_DIR/hotspot/setup-hotspot.sh"
+
+    echo "==> Installing hotspot control command"
+    install -m 755 "$SCRIPT_DIR/hotspot/hotspot-ctl.sh" /usr/local/bin/stepsolve-hotspot
+
+    echo "==> Installing hotspot auto-switch timer"
+    install -m 644 "$SCRIPT_DIR/hotspot/stepsolve-hotspot-switch.service" /etc/systemd/system/
+    install -m 644 "$SCRIPT_DIR/hotspot/stepsolve-hotspot-switch.timer"   /etc/systemd/system/
+    systemctl daemon-reload
+    systemctl enable --now stepsolve-hotspot-switch.timer
+else
+    echo "    nmcli not found — Wi-Fi hotspot auto-switch will not be installed."
+    echo "    Install with: sudo apt-get install -y network-manager"
+fi
+
 # ── Optional: Astrometry.net ─────────────────────────────────────────────────
 if command -v solve-field &>/dev/null; then
     echo "==> astrometry.net already installed ($(command -v solve-field))"
@@ -134,6 +157,12 @@ echo "  Installation complete!"
 echo ""
 echo "  Dashboard:  http://stepsolve.local:5001"
 echo "  LX200:      stepsolve.local:5002"
+echo "  Hotspot:    SSID '${HOTSPOT_SSID:-StepSolve}' when no known network is in range"
+echo "              Force it for testing: sudo stepsolve-hotspot force-hotspot"
+echo "              Back to auto:         sudo stepsolve-hotspot auto"
+if [[ -n "${PHONE_HOTSPOT_SSID:-}" ]]; then
+    echo "  Phone fallback: '${PHONE_HOTSPOT_SSID}' registered (priority ${PHONE_HOTSPOT_PRIORITY:-5})"
+fi
 echo ""
 echo "  Service status:"
 systemctl status stepsolve --no-pager -l || true
