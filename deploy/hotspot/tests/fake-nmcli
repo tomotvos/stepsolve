@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Stub nmcli for testing hotspot-switch.sh / hotspot-ctl.sh in isolation.
+# Controlled via env vars set by the test:
+#   FAKE_KNOWN_PROFILES     "name1=ssid1;name2=ssid2"  (client profiles nmcli knows about)
+#   FAKE_PROFILE_PRIORITIES "name1=10;name2=5"         (connection.autoconnect-priority per profile, default 0)
+#   FAKE_VISIBLE_SSIDS      "ssid-a\nssid-b"           (SSIDs the scan sees, one per line)
+#   FAKE_ACTIVE_PROFILE     "some-profile-name"        (currently active connection on the device)
+#   NMCLI_UP_LOG            path to append each "connection up <name>" call to
+
+args=("$@")
+
+if [[ "${args[0]}" == "-t" && "${args[2]}" == "NAME,TYPE" && "${args[3]}" == "connection" && "${args[4]}" == "show" ]]; then
+    IFS=';' read -ra pairs <<< "$FAKE_KNOWN_PROFILES"
+    for pair in "${pairs[@]}"; do
+        [[ -z "$pair" ]] && continue
+        name="${pair%%=*}"
+        echo "${name}:802-11-wireless"
+    done
+    echo "stepsolve-hotspot:802-11-wireless"
+    exit 0
+fi
+
+if [[ "${args[0]}" == "-g" && "${args[1]}" == "802-11-wireless.ssid" && "${args[2]}" == "connection" && "${args[3]}" == "show" ]]; then
+    profile="${args[4]}"
+    IFS=';' read -ra pairs <<< "$FAKE_KNOWN_PROFILES"
+    for pair in "${pairs[@]}"; do
+        [[ -z "$pair" ]] && continue
+        name="${pair%%=*}"
+        ssid="${pair#*=}"
+        if [[ "$name" == "$profile" ]]; then
+            echo "$ssid"
+            exit 0
+        fi
+    done
+    exit 1
+fi
+
+if [[ "${args[0]}" == "-g" && "${args[1]}" == "connection.autoconnect-priority" && "${args[2]}" == "connection" && "${args[3]}" == "show" ]]; then
+    profile="${args[4]}"
+    IFS=';' read -ra pairs <<< "$FAKE_PROFILE_PRIORITIES"
+    for pair in "${pairs[@]}"; do
+        [[ -z "$pair" ]] && continue
+        name="${pair%%=*}"
+        prio="${pair#*=}"
+        if [[ "$name" == "$profile" ]]; then
+            echo "$prio"
+            exit 0
+        fi
+    done
+    echo "0"
+    exit 0
+fi
+
+if [[ "${args[0]}" == "-t" && "${args[2]}" == "SSID" && "${args[3]}" == "dev" && "${args[4]}" == "wifi" ]]; then
+    printf '%b\n' "$FAKE_VISIBLE_SSIDS"
+    exit 0
+fi
+
+if [[ "${args[0]}" == "-t" && "${args[2]}" == "GENERAL.CONNECTION" && "${args[3]}" == "dev" && "${args[4]}" == "show" ]]; then
+    echo "GENERAL.CONNECTION:${FAKE_ACTIVE_PROFILE:---}"
+    exit 0
+fi
+
+if [[ "${args[0]}" == "connection" && "${args[1]}" == "up" ]]; then
+    echo "${args[2]}" >> "$NMCLI_UP_LOG"
+    exit 0
+fi
+
+echo "fake-nmcli: unhandled args: ${args[*]}" >&2
+exit 1
