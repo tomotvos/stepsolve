@@ -32,7 +32,7 @@ stepsolve/deploy/hotspot/
   stepsolve-hotspot-switch.service    # systemd oneshot unit that runs hotspot-switch.sh
   stepsolve-hotspot-switch.timer      # systemd timer (20s boot delay, 30s interval)
   tests/
-    fake-nmcli                        # stub nmcli binary used only by the test harness
+    nmcli                              # stub nmcli binary used only by the test harness
     test_hotspot_switch.sh            # scenario tests for hotspot-switch.sh's decision logic
     test_hotspot_ctl.sh               # tests for hotspot-ctl.sh's argument handling / mode writing
 
@@ -48,7 +48,7 @@ stepsolve/deploy/PI_SETUP.md           # modified: add "Wi-Fi Hotspot (Field Use
 
 **Files:**
 - Create: `deploy/hotspot/hotspot-switch.sh`
-- Create: `deploy/hotspot/tests/fake-nmcli`
+- Create: `deploy/hotspot/tests/nmcli`
 - Create: `deploy/hotspot/tests/test_hotspot_switch.sh`
 
 **Interfaces:**
@@ -56,7 +56,7 @@ stepsolve/deploy/PI_SETUP.md           # modified: add "Wi-Fi Hotspot (Field Use
 
 - [ ] **Step 1: Write the fake `nmcli` test stub**
 
-Create `deploy/hotspot/tests/fake-nmcli`:
+Create `deploy/hotspot/tests/nmcli`:
 
 ```bash
 #!/usr/bin/env bash
@@ -127,12 +127,12 @@ if [[ "${args[0]}" == "connection" && "${args[1]}" == "up" ]]; then
     exit 0
 fi
 
-echo "fake-nmcli: unhandled args: ${args[*]}" >&2
+echo "nmcli stub: unhandled args: ${args[*]}" >&2
 exit 1
 ```
 
 ```bash
-chmod +x deploy/hotspot/tests/fake-nmcli
+chmod +x deploy/hotspot/tests/nmcli
 ```
 
 - [ ] **Step 2: Write the test scenarios**
@@ -146,7 +146,7 @@ Create `deploy/hotspot/tests/test_hotspot_switch.sh`:
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PATH="$SCRIPT_DIR:$PATH"   # fake-nmcli shadows the real nmcli
+export PATH="$SCRIPT_DIR:$PATH"   # this directory's nmcli stub shadows the real nmcli
 export NMCLI_UP_LOG
 export STEPSOLVE_HOTSPOT_MODE_FILE
 fail=0
@@ -377,7 +377,7 @@ PASS: force-client never falls back to hotspot
 
 - [ ] **Step 6: Syntax-check with bash and shellcheck if available**
 
-Run: `bash -n deploy/hotspot/hotspot-switch.sh && bash -n deploy/hotspot/tests/test_hotspot_switch.sh && bash -n deploy/hotspot/tests/fake-nmcli`
+Run: `bash -n deploy/hotspot/hotspot-switch.sh && bash -n deploy/hotspot/tests/test_hotspot_switch.sh && bash -n deploy/hotspot/tests/nmcli`
 Expected: no output, exit code 0.
 
 Run (only if `shellcheck` is installed — skip if not, it's not a repo dependency): `shellcheck deploy/hotspot/hotspot-switch.sh`
@@ -386,7 +386,7 @@ Expected: no errors (warnings about the `logger` fallback pattern are acceptable
 - [ ] **Step 7: Commit**
 
 ```bash
-git add deploy/hotspot/hotspot-switch.sh deploy/hotspot/tests/fake-nmcli deploy/hotspot/tests/test_hotspot_switch.sh
+git add deploy/hotspot/hotspot-switch.sh deploy/hotspot/tests/nmcli deploy/hotspot/tests/test_hotspot_switch.sh
 git commit -m "feat: add Wi-Fi hotspot/client auto-switch script"
 ```
 
