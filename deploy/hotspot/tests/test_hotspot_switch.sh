@@ -4,7 +4,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PATH="$SCRIPT_DIR:$PATH"   # fake-nmcli shadows the real nmcli
+export PATH="$SCRIPT_DIR:$PATH"   # this directory's nmcli stub shadows the real nmcli
 export NMCLI_UP_LOG
 export STEPSOLVE_HOTSPOT_MODE_FILE
 fail=0

@@ -66,5 +66,5 @@ if [[ "${args[0]}" == "connection" && "${args[1]}" == "up" ]]; then
     exit 0
 fi
 
-echo "fake-nmcli: unhandled args: ${args[*]}" >&2
+echo "nmcli: unhandled args: ${args[*]}" >&2
 exit 1
