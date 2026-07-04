@@ -1,0 +1,8 @@
+[Unit]
+Description=StepSolve Wi-Fi hotspot/client auto-switch
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/stepsolve/deploy/hotspot/hotspot-switch.sh
