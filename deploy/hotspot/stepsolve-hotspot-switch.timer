@@ -1,0 +1,10 @@
+[Unit]
+Description=Run StepSolve Wi-Fi hotspot/client auto-switch periodically
+
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=30s
+Unit=stepsolve-hotspot-switch.service
+
+[Install]
+WantedBy=timers.target
