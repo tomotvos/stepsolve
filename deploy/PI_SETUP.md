@@ -169,6 +169,33 @@ This only *registers* the network — you still turn your phone's hotspot on
 when you actually need it in the field; the Pi will pick it up on its next
 30-second scan.
 
+**For the Pi to actually detect it**, confirmed by real testing:
+
+- Your phone must not be connected to its own Wi-Fi network at the time —
+  when the phone is already on Wi-Fi, its Personal/Mobile Hotspot may not
+  broadcast reliably even if the toggle shows "on." Make sure it's on
+  cellular only.
+- Enable "Maximize Compatibility" (iPhone: Settings → Personal Hotspot) or
+  the equivalent 2.4GHz-only setting (Android, varies by manufacturer).
+  Phones often default their hotspot to 5GHz when the connecting device
+  supports it, but this Pi's own hotspot — and critically, its ability to
+  scan for other networks *while* broadcasting one — is 2.4GHz-only
+  (`802-11-wireless.band bg` in `setup-hotspot.sh`). A 5GHz-only phone
+  hotspot may never be seen while the Pi is in AP mode.
+- Use a plain, ASCII-only name for the phone's hotspot (on iPhone, rename
+  the device itself under Settings → General → About → Name, since the
+  default hotspot name derives from it) and register that *exact* name as
+  `PHONE_HOTSPOT_SSID`. Default iPhone hotspot names use a Unicode "smart
+  quote" apostrophe (e.g. `Tom's iPhone` with `’`, not a plain `'`), which
+  can get mangled passing through SSH → shell → env var → `nmcli` →
+  NetworkManager — a silent match failure that's easy to misdiagnose as a
+  Wi-Fi problem rather than a naming one. Verify what's actually registered
+  with:
+  ```bash
+  nmcli -g 802-11-wireless.ssid connection show stepsolve-phone
+  ```
+  and compare it against what the phone actually broadcasts.
+
 **Any other known network** (a friend's house, a star party's shared
 Wi-Fi) can be added the same way NetworkManager always adds networks, and
 the auto-switch will pick it up automatically with no StepSolve-specific
@@ -230,6 +257,64 @@ sudo env HOTSPOT_SSID=MyScope HOTSPOT_PASSWORD=mypassword1 \
 journalctl -t stepsolve-hotspot-switch -f
 systemctl status stepsolve-hotspot-switch.timer
 ```
+
+### Testing tips: simulating network changes safely
+
+A few non-obvious gotchas from real testing, worth knowing before you dig in:
+
+- **`force-hotspot` persists across reboots and never self-recovers.** It's
+  a plain file at `/etc/stepsolve/hotspot-mode`, re-enforced by the timer
+  on every boot and every 30s tick — that's the entire point of "force":
+  it deliberately ignores whatever networks are in range until you change
+  the mode back. Don't reboot while it's set unless you mean to, or SSH
+  over your home network becomes unreliable (the timer will yank `wlan0`
+  onto the Pi's own hotspot within ~20-30s of boot, mid-session). If this
+  happens: `ssh pi@stepsolve.local "sudo stepsolve-hotspot auto"` (a single
+  non-interactive command survives a short/flaky connection window better
+  than an interactive login), or connect to the `StepSolve` hotspot
+  directly (default gateway `10.42.0.1`) and reset it from there with no
+  time pressure.
+
+- **`nmcli connection down <profile>` does not simulate "out of range."**
+  It only disconnects the Pi from that network — the router keeps
+  broadcasting, so the very next scan finds it again and the timer just
+  reconnects, with no visible effect. To genuinely test the
+  no-known-network-in-range fallback path without physically moving the
+  Pi, temporarily point the profile at a nonexistent SSID instead:
+  ```bash
+  nmcli -g 802-11-wireless.ssid connection show preconfigured   # note the real one first
+  sudo nmcli connection modify preconfigured 802-11-wireless.ssid "NOT-REALLY-IN-RANGE-TEST"
+  ```
+  Within ~30s the timer should fall back to `stepsolve-hotspot` (this will
+  drop an active SSH session over that network — expected, and confirms
+  the switch happened). Restore the real SSID afterward to test recovery
+  back to it, unattended:
+  ```bash
+  sudo nmcli connection modify preconfigured 802-11-wireless.ssid "<real SSID>"
+  ```
+  Don't run any `stepsolve-hotspot` command after restoring it — the point
+  is confirming the 30s timer notices and switches back on its own.
+
+- **Priority only matters among networks currently visible in a scan** —
+  it is not a fallback chain that tries each configured network in turn
+  regardless of whether it's actually broadcasting. If a higher-priority
+  network you expected to lose isn't actually in range at that moment
+  (phone hotspot off or not detectable, etc.), the next-priority network —
+  or the Pi's own hotspot if nothing matches — wins immediately, on that
+  same tick.
+
+- **If this Pi previously ran skysolve-next**, check for a leftover
+  competing hotspot manager before testing:
+  ```bash
+  systemctl list-units --all | grep -iE "access|skysolve"
+  ```
+  `AccessPopup.timer`/`AccessPopup.service` (from RaspberryConnect.com,
+  often installed alongside old skysolve-next setups) does its own
+  NetworkManager-based hotspot switching and will fight
+  `stepsolve-hotspot-switch.timer` for control of `wlan0` if left enabled:
+  ```bash
+  sudo systemctl disable --now AccessPopup.timer AccessPopup.service
+  ```
 
 ---
 
