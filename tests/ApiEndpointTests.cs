@@ -33,23 +33,13 @@ public class ApiEndpointTests
                         ["OnStep:Enabled"] = "false",
                     });
                 });
-                webBuilder.ConfigureServices(services =>
+                webBuilder.ConfigureServices((context, services) =>
                 {
                     services.AddRouting();
-                    services.Configure<StepSolveOptions>(sp =>
-                    {
-                        sp.Mode = "demo";
-                        sp.WebPort = 5001;
-                    });
-                    services.Configure<SolverOptions>(sp =>
-                    {
-                        sp.Backend = "astrometry";
-                    });
-                    services.Configure<CameraOptions>(sp => { });
-                    services.Configure<OnStepOptions>(sp =>
-                    {
-                        sp.Enabled = false;
-                    });
+                    services.Configure<StepSolveOptions>(context.Configuration.GetSection(StepSolveOptions.Section));
+                    services.Configure<SolverOptions>(context.Configuration.GetSection(SolverOptions.Section));
+                    services.Configure<CameraOptions>(context.Configuration.GetSection(CameraOptions.Section));
+                    services.Configure<OnStepOptions>(context.Configuration.GetSection(OnStepOptions.Section));
                     services.AddSingleton<SolveState>();
                     services.AddSingleton<ISolver, AstrometrySolver>();
                     services.AddSingleton<OnStepClient>();
@@ -61,12 +51,12 @@ public class ApiEndpointTests
                     app.UseRouting();
                     app.UseEndpoints(endpoints =>
                     {
-                        endpoints.MapGet("/status", (SolveState state, IOptions<StepSolveOptions> opts, IOptions<OnStepOptions> onstepOpts, OnStepClient onstepClient) =>
+                        endpoints.MapGet("/status", (SolveState state, IOptionsMonitor<StepSolveOptions> opts, IOptionsMonitor<OnStepOptions> onstepOpts, OnStepClient onstepClient) =>
                         {
                             var (result, timestamp, currentState) = state.Current;
                             return Results.Ok(new
                             {
-                                mode = opts.Value.Mode,
+                                mode = opts.CurrentValue.Mode,
                                 state = currentState,
                                 ra = result?.RaDeg,
                                 dec = result?.DecDeg,
@@ -94,17 +84,17 @@ public class ApiEndpointTests
                         });
 
                         endpoints.MapGet("/settings", (
-                            IOptions<StepSolveOptions> stepOpts,
-                            IOptions<SolverOptions> solverOpts,
-                            IOptions<CameraOptions> cameraOpts,
-                            IOptions<OnStepOptions> onstepOpts) =>
+                            IOptionsMonitor<StepSolveOptions> stepOpts,
+                            IOptionsMonitor<SolverOptions> solverOpts,
+                            IOptionsMonitor<CameraOptions> cameraOpts,
+                            IOptionsMonitor<OnStepOptions> onstepOpts) =>
                         {
                             return Results.Ok(new
                             {
-                                stepSolve = stepOpts.Value,
-                                solver = solverOpts.Value,
-                                camera = cameraOpts.Value,
-                                onstep = onstepOpts.Value,
+                                stepSolve = stepOpts.CurrentValue,
+                                solver = solverOpts.CurrentValue,
+                                camera = cameraOpts.CurrentValue,
+                                onstep = onstepOpts.CurrentValue,
                             });
                         });
 
@@ -262,6 +252,34 @@ public class ApiEndpointTests
             Assert.True(json.TryGetProperty("solver", out _));
             Assert.True(json.TryGetProperty("camera", out _));
             Assert.True(json.TryGetProperty("onstep", out _));
+        }
+        finally
+        {
+            await host.StopAsync();
+            host.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task GetSettings_ReturnsReloadedOnStepConfiguration()
+    {
+        var host = CreateTestHost();
+        await host.StartAsync();
+        try
+        {
+            var configuration = host.Services.GetRequiredService<IConfiguration>();
+            configuration["OnStep:Enabled"] = "true";
+            configuration["OnStep:Host"] = "192.168.4.1";
+            host.Services.GetRequiredService<IOptionsMonitorCache<OnStepOptions>>().TryRemove(Options.DefaultName);
+
+            var client = host.GetTestServer().CreateClient();
+            var response = await client.GetAsync("/settings");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var onstep = json.GetProperty("onstep");
+            Assert.True(onstep.GetProperty("enabled").GetBoolean());
+            Assert.Equal("192.168.4.1", onstep.GetProperty("host").GetString());
         }
         finally
         {

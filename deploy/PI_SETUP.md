@@ -38,7 +38,7 @@ This single command builds the binary, rsyncs it to the Pi, and runs the install
 
 ```bash
 cd stepsolve
-PI_HOST=pi@stepsolve.local bash scripts/deploy.sh --install
+PI_HOST=pi@rpistepsolve.local bash scripts/deploy.sh --install
 ```
 
 The installer will:
@@ -73,7 +73,7 @@ Save, then switch Mode to **Solve** from the dashboard header.
 If using the `astrometry` backend, download index files matching your FOV. Place them in `/var/lib/stepsolve/indexes/astrometry/`:
 
 ```bash
-ssh pi@stepsolve.local
+ssh pi@rpistepsolve.local
 mkdir -p /var/lib/stepsolve/indexes/astrometry
 cd /var/lib/stepsolve/indexes/astrometry
 
@@ -202,7 +202,7 @@ the auto-switch will pick it up automatically with no StepSolve-specific
 config:
 
 ```bash
-ssh pi@stepsolve.local
+ssh pi@rpistepsolve.local
 sudo nmcli device wifi connect "SomeOtherNetwork" password "its-password" ifname wlan0
 sudo nmcli connection modify "SomeOtherNetwork" connection.autoconnect-priority 3
 ```
@@ -269,7 +269,7 @@ A few non-obvious gotchas from real testing, worth knowing before you dig in:
   the mode back. Don't reboot while it's set unless you mean to, or SSH
   over your home network becomes unreliable (the timer will yank `wlan0`
   onto the Pi's own hotspot within ~20-30s of boot, mid-session). If this
-  happens: `ssh pi@stepsolve.local "sudo stepsolve-hotspot auto"` (a single
+  happens: `ssh pi@rpistepsolve.local "sudo stepsolve-hotspot auto"` (a single
   non-interactive command survives a short/flaky connection window better
   than an interactive login), or connect to the `StepSolve` hotspot
   directly (default gateway `10.42.0.1`) and reset it from there with no

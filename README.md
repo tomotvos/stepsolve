@@ -60,7 +60,7 @@ See **[`deploy/PI_SETUP.md`](deploy/PI_SETUP.md)** for the full setup guide.
 **First install** — flash Pi OS, then from your Mac:
 
 ```bash
-PI_HOST=pi@stepsolve.local bash scripts/deploy.sh --install
+PI_HOST=pi@rpistepsolve.local bash scripts/deploy.sh --install
 ```
 
 **Subsequent deploys** (build + rsync + restart in ~30 s):

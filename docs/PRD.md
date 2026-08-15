@@ -847,8 +847,8 @@ Produces a self-contained binary at `src/bin/Release/net10.0/linux-arm64/publish
 ### 10.2 Deploy (to Pi)
 
 ```bash
-rsync -az src/bin/Release/net10.0/linux-arm64/publish/ pi@stepsolve.local:/usr/local/lib/stepsolve/
-ssh pi@stepsolve.local "sudo systemctl restart stepsolve"
+rsync -az src/bin/Release/net10.0/linux-arm64/publish/ pi@rpistepsolve.local:/usr/local/lib/stepsolve/
+ssh pi@rpistepsolve.local "sudo systemctl restart stepsolve"
 ```
 
 ### 10.3 Systemd unit

@@ -873,7 +873,7 @@ the auto-switch will pick it up automatically with no StepSolve-specific
 config:
 
 ```bash
-ssh pi@stepsolve.local
+ssh pi@rpistepsolve.local
 sudo nmcli device wifi connect "SomeOtherNetwork" password "its-password" ifname wlan0
 sudo nmcli connection modify "SomeOtherNetwork" connection.autoconnect-priority 3
 ```

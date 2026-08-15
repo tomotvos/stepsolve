@@ -212,8 +212,8 @@ dotnet publish -c Release -r linux-arm64 --self-contained -p:PublishAot=true
 ### Deploy (to Pi)
 
 ```bash
-scp bin/Release/net9.0/linux-arm64/publish/stepsolve pi@stepsolve.local:/usr/local/bin/
-ssh pi@stepsolve.local "sudo systemctl restart stepsolve"
+scp bin/Release/net9.0/linux-arm64/publish/stepsolve pi@rpistepsolve.local:/usr/local/bin/
+ssh pi@rpistepsolve.local "sudo systemctl restart stepsolve"
 ```
 
 ### Systemd unit

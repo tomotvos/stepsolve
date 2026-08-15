@@ -83,13 +83,13 @@ if (currentVersion != "dev")
 }
 
 // GET /status — current solve state and configuration
-app.MapGet("/status", (SolveState state, IOptions<StepSolveOptions> opts, IOptions<OnStepOptions> onstepOpts, OnStepClient onstepClient) =>
+app.MapGet("/status", (SolveState state, IOptionsMonitor<StepSolveOptions> opts, IOptionsMonitor<OnStepOptions> onstepOpts, OnStepClient onstepClient) =>
 {
     var (result, timestamp, currentState) = state.Current;
     return Results.Ok(new
     {
         version = currentVersion,
-        mode = opts.Value.Mode,
+        mode = opts.CurrentValue.Mode,
         state = currentState,
         ra = result?.RaDeg,
         dec = result?.DecDeg,
@@ -99,9 +99,9 @@ app.MapGet("/status", (SolveState state, IOptions<StepSolveOptions> opts, IOptio
         lastSolveTimestamp = timestamp != default ? timestamp : (DateTimeOffset?)null,
         onstep = new
         {
-            enabled = onstepOpts.Value.Enabled,
-            host = onstepOpts.Value.Host,
-            port = onstepOpts.Value.Port,
+            enabled = onstepOpts.CurrentValue.Enabled,
+            host = onstepOpts.CurrentValue.Host,
+            port = onstepOpts.CurrentValue.Port,
             lastSyncTimestamp = onstepClient.LastSyncTime != default ? onstepClient.LastSyncTime : (DateTimeOffset?)null,
             lastSyncResult = onstepClient.LastSyncResult,
         }
@@ -144,17 +144,17 @@ app.MapPost("/mode", async (HttpContext ctx, IConfiguration config) =>
 
 // GET /settings — current configuration
 app.MapGet("/settings", (
-    IOptions<StepSolveOptions> stepOpts,
-    IOptions<SolverOptions> solverOpts,
-    IOptions<CameraOptions> cameraOpts,
-    IOptions<OnStepOptions> onstepOpts) =>
+    IOptionsMonitor<StepSolveOptions> stepOpts,
+    IOptionsMonitor<SolverOptions> solverOpts,
+    IOptionsMonitor<CameraOptions> cameraOpts,
+    IOptionsMonitor<OnStepOptions> onstepOpts) =>
 {
     return Results.Ok(new
     {
-        stepSolve = stepOpts.Value,
-        solver = solverOpts.Value,
-        camera = cameraOpts.Value,
-        onstep = onstepOpts.Value,
+        stepSolve = stepOpts.CurrentValue,
+        solver = solverOpts.CurrentValue,
+        camera = cameraOpts.CurrentValue,
+        onstep = onstepOpts.CurrentValue,
     });
 });
 
