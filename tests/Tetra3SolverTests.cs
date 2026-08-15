@@ -62,6 +62,49 @@ public class Tetra3SolverTests : IDisposable
     }
 
     [Fact]
+    public async Task SolveAsync_UsesUpdatedFovEstimateWithoutRestartingProcess()
+    {
+        var python = FindPython();
+        if (python == null) return;
+
+        var stub = WriteStub("""
+            import sys, json
+            print(json.dumps({"ready": True}), flush=True)
+            for line in sys.stdin:
+                line = line.strip()
+                if not line: continue
+                fov = json.loads(line).get("fov_estimate_deg")
+                print(json.dumps({"ra_deg": 1.0 if fov is None else fov, "dec_deg": 1.0, "confidence": 1.0}), flush=True)
+            """);
+        var options = new SolverOptions
+        {
+            FovEstimateDeg = 0,
+            Tetra3 = new Tetra3Options
+            {
+                PythonPath = python,
+                ScriptPath = stub,
+                IndexPath = "",
+                Timeout = 5,
+            }
+        };
+        var monitor = new TestOptionsMonitor<SolverOptions>(options);
+
+        using var solver = new Tetra3Solver(monitor, NullLogger<Tetra3Solver>.Instance);
+
+        var noHint = await solver.SolveAsync(_imagePath, null, CancellationToken.None);
+        Assert.Equal(1.0, noHint.RaDeg);
+
+        monitor.Set(new SolverOptions
+        {
+            FovEstimateDeg = 12.5,
+            Tetra3 = options.Tetra3,
+        });
+
+        var updatedHint = await solver.SolveAsync(_imagePath, null, CancellationToken.None);
+        Assert.Equal(12.5, updatedHint.RaDeg);
+    }
+
+    [Fact]
     public async Task SolveAsync_FileNotFound_ThrowsFileNotFoundException()
     {
         var python = FindPython();

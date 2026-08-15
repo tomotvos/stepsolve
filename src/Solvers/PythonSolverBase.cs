@@ -12,7 +12,7 @@ public abstract class PythonSolverBase : ISolver, IDisposable
     private readonly string _indexPath;
     private readonly int _timeoutSec;
     private readonly string _solverName;
-    private readonly double? _fovEstimateDeg;
+    private readonly Func<double?>? _fovEstimateDegProvider;
     protected readonly ILogger _logger;
 
     private Process? _process;
@@ -27,14 +27,14 @@ public abstract class PythonSolverBase : ISolver, IDisposable
         int timeoutSec,
         string solverName,
         ILogger logger,
-        double? fovEstimateDeg = null)
+        Func<double?>? fovEstimateDegProvider = null)
     {
         _pythonPath = pythonPath;
         _scriptPath = scriptPath;
         _indexPath = indexPath;
         _timeoutSec = timeoutSec;
         _solverName = solverName;
-        _fovEstimateDeg = fovEstimateDeg;
+        _fovEstimateDegProvider = fovEstimateDegProvider;
         _logger = logger;
     }
 
@@ -151,7 +151,7 @@ public abstract class PythonSolverBase : ISolver, IDisposable
             hints?.RaDeg,
             hints?.DecDeg,
             hints?.RadiusDeg,
-            _fovEstimateDeg));
+            _fovEstimateDegProvider?.Invoke()));
 
         try
         {
