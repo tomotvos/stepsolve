@@ -21,3 +21,7 @@ publish/
 
 ## Local dev config (contains machine-specific paths)
 src/appsettings.Development.json
+
+## Local workspace artifacts
+.obsidian/
+cad/
