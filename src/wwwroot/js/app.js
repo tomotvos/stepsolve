@@ -5,6 +5,7 @@
     var POLL_INTERVAL_MS = 5000;
     var MAX_LOG_ENTRIES = 500;
     var STALE_THRESHOLD_MS = 5000;
+    var CALIBRATION_POLL_INTERVAL_MS = 2000;
     var WS_RECONNECT_BASE_MS = 1000;
     var WS_RECONNECT_MAX_MS = 30000;
 
@@ -28,6 +29,17 @@
         onstepLastSync: document.getElementById('onstep-last-sync'),
         onstepResult: document.getElementById('onstep-result'),
         onstepSection: document.getElementById('onstep-display'),
+        calibrationSection: document.getElementById('onstep-calibration'),
+        calibrationState: document.getElementById('calibration-state'),
+        calibrationConnection: document.getElementById('calibration-connection'),
+        calibrationTarget: document.getElementById('calibration-target'),
+        calibrationPoint: document.getElementById('calibration-point'),
+        calibrationCandidate: document.getElementById('calibration-candidate'),
+        calibrationReply: document.getElementById('calibration-reply'),
+        calibrationMessage: document.getElementById('calibration-message'),
+        calibrationStart: document.getElementById('calibration-start'),
+        calibrationAccept: document.getElementById('calibration-accept'),
+        calibrationAbort: document.getElementById('calibration-abort'),
         logContainer: document.getElementById('log-container'),
         logPause: document.getElementById('log-pause'),
         logClear: document.getElementById('log-clear'),
@@ -71,6 +83,8 @@
         logEntryCount: 0,
         lastSolveTimestamp: null,
         staleTimer: null,
+        calibrationPollTimer: null,
+        mode: null,
     };
 
     // -- Formatting helpers --
@@ -144,10 +158,12 @@
     function updateMode(mode) {
         if (!mode) return;
         var lower = mode.toLowerCase();
+        state.mode = lower;
         els.modeSelect.value = lower;
         var inSolveLoop = lower === 'solve';
         els.solveNowBtn.disabled = inSolveLoop;
         els.solveNowBtn.title = inSolveLoop ? 'Solve loop is already running' : '';
+        updateCalibrationVisibility();
     }
 
     function updateOnStep(onstep) {
@@ -160,6 +176,53 @@
         els.onstepStatus.textContent = onstep.enabled !== false ? (hasSync ? 'Active' : 'Enabled') : 'Disabled';
         els.onstepLastSync.textContent = formatTime(onstep.lastSyncTimestamp);
         els.onstepResult.textContent = onstep.lastSyncResult || '--';
+        if (onstep.calibration) updateCalibration(onstep.calibration);
+    }
+
+    function updateCalibrationVisibility() {
+        var isCalibrateMode = state.mode === 'calibrate';
+        els.calibrationSection.hidden = !isCalibrateMode;
+
+        if (isCalibrateMode && !state.calibrationPollTimer) {
+            loadCalibrationStatus();
+            state.calibrationPollTimer = setInterval(loadCalibrationStatus, CALIBRATION_POLL_INTERVAL_MS);
+        } else if (!isCalibrateMode && state.calibrationPollTimer) {
+            clearInterval(state.calibrationPollTimer);
+            state.calibrationPollTimer = null;
+        }
+    }
+
+    function updateCalibration(calibration) {
+        if (!calibration) return;
+
+        els.calibrationState.textContent = calibration.state || '--';
+        els.calibrationConnection.textContent = calibration.isConnected ? (calibration.isSafe ? 'Connected / safe' : 'Connected / unsafe') : 'Not connected';
+        els.calibrationTarget.textContent = calibration.requestedAzimuthDeg != null && calibration.requestedAltitudeDeg != null
+            ? 'Az ' + calibration.requestedAzimuthDeg.toFixed(1) + '\u00B0, Alt ' + calibration.requestedAltitudeDeg.toFixed(1) + '\u00B0'
+            : '--';
+        els.calibrationPoint.textContent = calibration.currentPoint != null && calibration.currentPoint > 0
+            ? calibration.currentPoint + ' / 3' + (calibration.attempt ? ', attempt ' + calibration.attempt : '')
+            : '--';
+        els.calibrationCandidate.textContent = calibration.candidateRaDeg != null && calibration.candidateDecDeg != null
+            ? formatRa(calibration.candidateRaDeg) + ', ' + formatDec(calibration.candidateDecDeg)
+            : '--';
+        els.calibrationReply.textContent = calibration.lastReply || '--';
+        els.calibrationMessage.textContent = calibration.message || '';
+
+        // These are presentation hints only. The server repeats every safety and
+        // operating-mode check before issuing an OnStep command.
+        var isCalibrateMode = state.mode === 'calibrate';
+        els.calibrationStart.disabled = !isCalibrateMode || !calibration.isConnected || !calibration.isSafe;
+        els.calibrationAccept.disabled = !isCalibrateMode || calibration.candidateRaDeg == null || calibration.candidateDecDeg == null;
+        els.calibrationAbort.disabled = !isCalibrateMode || !calibration.state || calibration.state.toLowerCase() === 'idle';
+    }
+
+    function loadCalibrationStatus() {
+        if (state.mode !== 'calibrate') return;
+        fetch('/onstep/calibration')
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) { if (data) updateCalibration(data); })
+            .catch(function () { /* status polling will retry while Calibrate mode is active */ });
     }
 
     function updateFromStatus(data) {
@@ -354,6 +417,46 @@
                 if (!r.ok) pollStatus();
             })
             .catch(function () { pollStatus(); });
+    });
+
+    function requestCalibrationAction(path, body, successMessage) {
+        fetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body ? JSON.stringify(body) : null
+        })
+            .then(function (r) {
+                return r.json().catch(function () { return {}; }).then(function (data) {
+                    return { ok: r.ok, data: data };
+                });
+            })
+            .then(function (result) {
+                if (result.data.calibration) updateCalibration(result.data.calibration);
+                if (result.ok) {
+                    appendLog('INFO', successMessage);
+                } else {
+                    appendLog('WARNING', result.data.error || 'OnStep calibration action was rejected');
+                }
+                loadCalibrationStatus();
+            })
+            .catch(function () {
+                appendLog('ERROR', 'OnStep calibration: network error');
+            });
+    }
+
+    els.calibrationStart.addEventListener('click', function () {
+        if (!window.confirm('Start the OnStep three-point alignment sequence? The mount will move to its first configured target.')) return;
+        requestCalibrationAction('/onstep/alignment/start', { confirmed: true }, 'OnStep alignment started');
+    });
+
+    els.calibrationAccept.addEventListener('click', function () {
+        if (!window.confirm('Approve this plate-solved point and submit it to OnStep?')) return;
+        requestCalibrationAction('/onstep/alignment/accept', null, 'OnStep calibration point approved');
+    });
+
+    els.calibrationAbort.addEventListener('click', function () {
+        if (!window.confirm('Abort the OnStep alignment sequence?')) return;
+        requestCalibrationAction('/onstep/alignment/abort', null, 'OnStep alignment aborted');
     });
 
     els.logPause.addEventListener('click', function () {

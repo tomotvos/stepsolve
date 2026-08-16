@@ -186,11 +186,8 @@ public class Lx200ServerTests
     {
         _state.UpdateResult(new SolveResult(180.0, 45.0, null, null, 0.9, TimeSpan.Zero, "test"));
 
-        var opts = new TestOptionsMonitor<StepSolveOptions>(new StepSolveOptions { Lx200Port = 0 });
-        var server = new Lx200Server(_state, opts, NullLogger<Lx200Server>.Instance);
-
-        // Use port 0 to get a random available port — but we need a different approach.
-        // Instead, test with a known port range.
+        // The server binds asynchronously, so connect with a bounded retry
+        // rather than relying on a fixed startup delay under parallel load.
         var port = FindAvailablePort();
         var serverOpts = new TestOptionsMonitor<StepSolveOptions>(new StepSolveOptions { Lx200Port = port });
         var tcpServer = new Lx200Server(_state, serverOpts, NullLogger<Lx200Server>.Instance);
@@ -198,13 +195,9 @@ public class Lx200ServerTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await tcpServer.StartAsync(cts.Token);
 
-        // Give server time to start
-        await Task.Delay(200, cts.Token);
-
         try
         {
-            using var client = new TcpClient();
-            await client.ConnectAsync("127.0.0.1", port, cts.Token);
+            using var client = await ConnectWithRetryAsync(port, cts.Token);
             using var stream = client.GetStream();
 
             // Send batched commands like SkySafari does: ":GR#:GD#"
@@ -241,5 +234,28 @@ public class Lx200ServerTests
         var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
+    }
+
+    private static async Task<TcpClient> ConnectWithRetryAsync(int port, CancellationToken ct)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(2);
+        SocketException? lastError = null;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var client = new TcpClient();
+            try
+            {
+                await client.ConnectAsync("127.0.0.1", port, ct);
+                return client;
+            }
+            catch (SocketException ex) when (!ct.IsCancellationRequested)
+            {
+                lastError = ex;
+                client.Dispose();
+                await Task.Delay(25, ct);
+            }
+        }
+
+        throw new Xunit.Sdk.XunitException($"LX200 server did not listen within 2 seconds: {lastError?.Message}");
     }
 }

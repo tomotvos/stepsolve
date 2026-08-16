@@ -16,27 +16,37 @@ public class StepSolveServiceTests
     private sealed class StubCamera : ICameraCapture
     {
         public string? ImageToReturn { get; set; }
-        public int CaptureCount { get; private set; }
+        private int _captureCount;
+        private readonly TaskCompletionSource _captured = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int CaptureCount => Volatile.Read(ref _captureCount);
 
         public Task<string?> CaptureAsync(CancellationToken ct)
         {
-            CaptureCount++;
+            Interlocked.Increment(ref _captureCount);
+            _captured.TrySetResult();
             return Task.FromResult(ImageToReturn);
         }
+
+        public Task WaitForCaptureAsync(CancellationToken ct) => _captured.Task.WaitAsync(ct);
     }
 
     private sealed class StubSolver : ISolver
     {
         public SolveResult ResultToReturn { get; set; } = new(0, 0, null, null, 0, TimeSpan.Zero, "stub");
-        public int SolveCount { get; private set; }
+        private int _solveCount;
+        private readonly TaskCompletionSource _solved = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int SolveCount => Volatile.Read(ref _solveCount);
         public string? LastImagePath { get; private set; }
 
         public Task<SolveResult> SolveAsync(string imagePath, SolveHints? hints, CancellationToken ct)
         {
-            SolveCount++;
+            Interlocked.Increment(ref _solveCount);
             LastImagePath = imagePath;
+            _solved.TrySetResult();
             return Task.FromResult(ResultToReturn);
         }
+
+        public Task WaitForSolveAsync(CancellationToken ct) => _solved.Task.WaitAsync(ct);
     }
 
     private static IConfiguration CreateConfig(string mode = "solve")
@@ -71,8 +81,8 @@ public class StepSolveServiceTests
             var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
                 CreateConfig("demo"), NullLogger<StepSolveService>.Instance);
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-            try { await service.StartAsync(cts.Token); await Task.Delay(2500, cts.Token); }
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            try { await service.StartAsync(cts.Token); await solver.WaitForSolveAsync(cts.Token); }
             catch (OperationCanceledException) { }
             finally { await service.StopAsync(CancellationToken.None); }
 
@@ -103,9 +113,14 @@ public class StepSolveServiceTests
         var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
             CreateConfig("solve"), NullLogger<StepSolveService>.Instance);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-        try { await service.StartAsync(cts.Token); await Task.Delay(2000, cts.Token); }
+        try
+        {
+            await service.StartAsync(cts.Token);
+            await camera.WaitForCaptureAsync(cts.Token);
+            await solver.WaitForSolveAsync(cts.Token);
+        }
         catch (OperationCanceledException) { }
         finally { await service.StopAsync(CancellationToken.None); }
 
@@ -128,9 +143,9 @@ public class StepSolveServiceTests
         var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
             CreateConfig("solve"), NullLogger<StepSolveService>.Instance);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-        try { await service.StartAsync(cts.Token); await Task.Delay(1500, cts.Token); }
+        try { await service.StartAsync(cts.Token); await camera.WaitForCaptureAsync(cts.Token); }
         catch (OperationCanceledException) { }
         finally { await service.StopAsync(CancellationToken.None); }
 
@@ -147,7 +162,7 @@ public class StepSolveServiceTests
         var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
             CreateConfig("idle"), NullLogger<StepSolveService>.Instance);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         try { await service.StartAsync(cts.Token); await Task.Delay(1500, cts.Token); }
         catch (OperationCanceledException) { }

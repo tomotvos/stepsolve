@@ -41,6 +41,9 @@ SolverRegistration.Register(builder.Services);
 
 // OnStep client for mount sync
 builder.Services.AddSingleton<OnStepClient>();
+builder.Services.AddSingleton<OnStepCalibrationController>();
+builder.Services.AddSingleton<IOnStepCalibrationController>(sp => sp.GetRequiredService<OnStepCalibrationController>());
+builder.Services.AddSingleton<IOnStepCalibrationSession>(sp => sp.GetRequiredService<OnStepCalibrationController>());
 
 // WebSocket broadcaster for real-time dashboard updates
 builder.Services.AddSingleton<WebSocketBroadcaster>();
@@ -83,7 +86,7 @@ if (currentVersion != "dev")
 }
 
 // GET /status — current solve state and configuration
-app.MapGet("/status", (SolveState state, IOptionsMonitor<StepSolveOptions> opts, IOptionsMonitor<OnStepOptions> onstepOpts, OnStepClient onstepClient) =>
+app.MapGet("/status", (SolveState state, IOptionsMonitor<StepSolveOptions> opts, IOptionsMonitor<OnStepOptions> onstepOpts, OnStepClient onstepClient, IOnStepCalibrationController calibrationController) =>
 {
     var (result, timestamp, currentState) = state.Current;
     return Results.Ok(new
@@ -104,6 +107,7 @@ app.MapGet("/status", (SolveState state, IOptionsMonitor<StepSolveOptions> opts,
             port = onstepOpts.CurrentValue.Port,
             lastSyncTimestamp = onstepClient.LastSyncTime != default ? onstepClient.LastSyncTime : (DateTimeOffset?)null,
             lastSyncResult = onstepClient.LastSyncResult,
+            calibration = calibrationController.Status,
         }
     });
 });
@@ -170,6 +174,49 @@ app.MapPost("/settings", async (HttpContext ctx, SettingsService settingsSvc) =>
         return Results.BadRequest(new { error });
 
     return Results.Ok(new { updated = true });
+});
+
+// GET /onstep/calibration — current read-only alignment state for the dashboard.
+app.MapGet("/onstep/calibration", (IOnStepCalibrationController controller) =>
+    Results.Ok(controller.Status));
+
+// Alignment mutations are deliberately separate from mode and settings changes.
+// The controller owns the connection, mount-safety, and Calibrate-mode guards.
+app.MapPost("/onstep/alignment/start", async (
+    StartAlignmentRequest? request,
+    IOptionsMonitor<StepSolveOptions> options,
+    IOnStepCalibrationController controller,
+    HttpContext ctx) =>
+{
+    if (request?.Confirmed != true)
+        return Results.BadRequest(new { error = "Starting alignment requires explicit confirmation" });
+
+    var result = await controller.StartAsync(request.Confirmed, options.CurrentValue.Mode, ctx.RequestAborted);
+    return result.Success
+        ? Results.Ok(new { calibration = controller.Status })
+        : Results.BadRequest(new { error = result.Error ?? "Unable to start alignment", calibration = controller.Status });
+});
+
+app.MapPost("/onstep/alignment/accept", async (
+    IOptionsMonitor<StepSolveOptions> options,
+    IOnStepCalibrationController controller,
+    HttpContext ctx) =>
+{
+    var result = await controller.AcceptAsync(options.CurrentValue.Mode, ctx.RequestAborted);
+    return result.Success
+        ? Results.Ok(new { calibration = controller.Status })
+        : Results.BadRequest(new { error = result.Error ?? "Unable to accept calibration point", calibration = controller.Status });
+});
+
+app.MapPost("/onstep/alignment/abort", async (
+    IOptionsMonitor<StepSolveOptions> options,
+    IOnStepCalibrationController controller,
+    HttpContext ctx) =>
+{
+    var result = await controller.AbortAsync(options.CurrentValue.Mode, ctx.RequestAborted);
+    return result.Success
+        ? Results.Ok(new { calibration = controller.Status })
+        : Results.BadRequest(new { error = result.Error ?? "Unable to abort alignment", calibration = controller.Status });
 });
 
 // POST /solve — on-demand solve: demo pulse (?demo=1) or uploaded image
@@ -411,6 +458,7 @@ app.Run();
 
 // Request DTOs
 record ModeRequest(string? Mode);
+record StartAlignmentRequest(bool Confirmed);
 
 // Update check state — populated once at startup, read by /system/update/check
 sealed class UpdateState(string currentVersion)

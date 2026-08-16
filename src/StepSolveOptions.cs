@@ -69,4 +69,31 @@ public sealed class OnStepOptions
     public int Port { get; set; } = 9998;
     public string SyncMode { get; set; } = "sync";
     public double MaxSyncDeltaDeg { get; set; } = 5.0;
+
+    // New calibration behaviour is deliberately read-only by default. The
+    // legacy SyncMode remains for compatibility with existing configurations.
+    public string StartupPolicy { get; set; } = "probe";
+    public string BackgroundPolicy { get; set; } = "validate";
+    public double MinSolveConfidence { get; set; } = 0.90;
+    public int StableSolveIntervalSeconds { get; set; } = 5;
+    public double MaxSolveDisagreementDeg { get; set; } = 0.05;
+    public int CalibrationSettleSeconds { get; set; } = 5;
+    public int CalibrationTargetRetryCount { get; set; } = 3;
+
+    // V1 reference-rig guard rails. These are intentionally narrower than
+    // generic Alt-Az ranges and may be changed only through reviewed config.
+    public double CalibrationMinAltitudeDeg { get; set; } = 15;
+    public double CalibrationMaxAltitudeDeg { get; set; } = 85;
+    public double CalibrationMinAzimuthDeg { get; set; } = -150;
+    public double CalibrationMaxAzimuthDeg { get; set; } = 150;
+
+    // Ordered as Az/Alt, relative to the established 0,0 home reference.
+    public List<OnStepCalibrationTarget> CalibrationTargets { get; set; } =
+    [
+        new(0, 45),
+        new(60, 60),
+        new(90, 80),
+    ];
 }
+
+public sealed record OnStepCalibrationTarget(double AzimuthDeg, double AltitudeDeg);

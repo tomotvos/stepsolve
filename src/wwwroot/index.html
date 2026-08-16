@@ -56,6 +56,23 @@
             <div class="field"><label>Result</label><span id="onstep-result">--</span></div>
         </section>
 
+        <!-- Only shown in Calibrate mode. Commands remain guarded by the server. -->
+        <section id="onstep-calibration" hidden>
+            <h2>OnStep Alignment</h2>
+            <div class="field"><label>Session</label><span id="calibration-state">--</span></div>
+            <div class="field"><label>Connection</label><span id="calibration-connection">--</span></div>
+            <div class="field"><label>Target</label><span id="calibration-target">--</span></div>
+            <div class="field"><label>Point / attempt</label><span id="calibration-point">--</span></div>
+            <div class="field"><label>Candidate</label><span id="calibration-candidate">--</span></div>
+            <div class="field"><label>Mount reply</label><span id="calibration-reply">--</span></div>
+            <p id="calibration-message" class="calibration-message">Switch to Calibrate mode to align OnStep.</p>
+            <div class="calibration-actions">
+                <button id="calibration-start" class="btn-primary">Start 3-Point Alignment</button>
+                <button id="calibration-accept" class="btn-secondary">Approve Point</button>
+                <button id="calibration-abort" class="btn-danger">Abort</button>
+            </div>
+        </section>
+
         <!-- Settings panel -->
         <details id="settings-section">
             <summary>Settings</summary>

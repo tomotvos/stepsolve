@@ -19,6 +19,7 @@ public sealed class StepSolveService : BackgroundService
     private readonly WebSocketBroadcaster _ws;
     private readonly IConfiguration _config;
     private readonly ILogger<StepSolveService> _logger;
+    private readonly IOnStepCalibrationSession? _calibration;
 
     public StepSolveService(
         ICameraCapture camera,
@@ -27,7 +28,8 @@ public sealed class StepSolveService : BackgroundService
         OnStepClient onstep,
         WebSocketBroadcaster ws,
         IConfiguration config,
-        ILogger<StepSolveService> logger)
+        ILogger<StepSolveService> logger,
+        IOnStepCalibrationSession? calibration = null)
     {
         _camera = camera;
         _solver = solver;
@@ -36,11 +38,23 @@ public sealed class StepSolveService : BackgroundService
         _ws = ws;
         _config = config;
         _logger = logger;
+        _calibration = calibration;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("StepSolve service starting, mode={Mode}", CurrentMode);
+        if (_calibration != null)
+        {
+            try
+            {
+                await _calibration.InitializeAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+        }
         var prevMode = "";
 
         while (!stoppingToken.IsCancellationRequested)
@@ -117,8 +131,9 @@ public sealed class StepSolveService : BackgroundService
             _ = _ws.BroadcastSolve(result, hasImage: true);
             _ = _ws.BroadcastStatus(CurrentMode, "solved", _onstep);
 
-            // Sync to OnStep (fire-and-forget — does not block solve loop)
-            _ = _onstep.SyncAsync(result, ct);
+            // Automatic mount mutation is intentionally disabled. The default
+            // OnStep background policy is read-only validation; model points
+            // are added only by the explicit Calibrate-mode approval flow.
         }
         else
         {
@@ -174,6 +189,12 @@ public sealed class StepSolveService : BackgroundService
     // No-op on non-Linux since there is no real camera there.
     private async Task RunCalibrateCycle(CancellationToken ct)
     {
+        // The calibration controller advances only through its explicit state
+        // machine. It polls an active OnStep GoTo here; a dashboard request
+        // alone can never create a solved candidate.
+        if (_calibration != null)
+            await _calibration.TickAsync(ct);
+
         if (!OperatingSystem.IsLinux())
         {
             _state.SetState("idle");
@@ -192,6 +213,23 @@ public sealed class StepSolveService : BackgroundService
         }
 
         _state.SetImagePath(imagePath);
+
+        // While an approved OnStep calibration session is waiting for fresh
+        // plate solves, use this newly captured frame. Normal Calibrate mode
+        // remains preview-only and never invokes the solver.
+        if (_calibration?.NeedsFreshSolve == true)
+        {
+            _state.SetState("solving");
+            _ = _ws.BroadcastStatus(CurrentMode, "solving", _onstep);
+            var result = await _solver.SolveAsync(imagePath, hints: null, ct);
+            if (result.IsValid)
+            {
+                _state.UpdateResult(result, imagePath);
+                _ = _ws.BroadcastSolve(result, hasImage: true);
+            }
+            await _calibration.SubmitFreshSolveAsync(result, ct);
+        }
+
         _state.SetState("idle");
         _ = _ws.BroadcastImage("/solve/image");
         _logger.LogDebug("Calibrate frame captured: {Path}", imagePath);

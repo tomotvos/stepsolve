@@ -187,6 +187,31 @@ details summary {
     padding: 0.75rem;
 }
 
+/* OnStep alignment controls (visible only in Calibrate mode) */
+.calibration-message {
+    margin-top: 0.75rem;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+
+.calibration-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.calibration-actions .btn-primary {
+    min-width: 0;
+    flex: 1 1 100%;
+}
+
+.calibration-actions .btn-secondary,
+.calibration-actions .btn-danger {
+    flex: 1 1 auto;
+}
+
 .btn-primary {
     background: var(--btn-bg);
     color: var(--btn-text);
@@ -477,6 +502,7 @@ details summary {
     #image-preview   { grid-column: 1; }
     #action-bar      { grid-column: 1; }
     #onstep-display  { grid-column: 1; }
+    #onstep-calibration { grid-column: 1; }
     #settings-section { grid-column: 1 / span 2; }
     #update-section   { grid-column: 1 / span 2; }
     #log-section     { grid-column: 2; grid-row: 1 / span 4; }

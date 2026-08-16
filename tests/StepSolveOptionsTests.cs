@@ -54,6 +54,12 @@ public class StepSolveOptionsTests
         Assert.Equal(9998, opts.Port);
         Assert.Equal("sync", opts.SyncMode);
         Assert.Equal(5.0, opts.MaxSyncDeltaDeg);
+        Assert.Equal("probe", opts.StartupPolicy);
+        Assert.Equal("validate", opts.BackgroundPolicy);
+        Assert.Collection(opts.CalibrationTargets,
+            target => Assert.Equal(new OnStepCalibrationTarget(0, 45), target),
+            target => Assert.Equal(new OnStepCalibrationTarget(60, 60), target),
+            target => Assert.Equal(new OnStepCalibrationTarget(90, 80), target));
     }
 
     [Fact]
