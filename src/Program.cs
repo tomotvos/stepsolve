@@ -219,6 +219,22 @@ app.MapPost("/onstep/alignment/abort", async (
         : Results.BadRequest(new { error = result.Error ?? "Unable to abort alignment", calibration = controller.Status });
 });
 
+// Simulation is deliberately session-only: it is never persisted in settings.
+app.MapPost("/onstep/calibration/simulation", async (
+    SimulationRequest? request,
+    IOptionsMonitor<StepSolveOptions> options,
+    IOnStepCalibrationController controller,
+    HttpContext ctx) =>
+{
+    if (request == null)
+        return Results.BadRequest(new { error = "Expected a simulation enabled value" });
+
+    var result = await controller.SetSimulationAsync(request.Enabled, options.CurrentValue.Mode, ctx.RequestAborted);
+    return result.Success
+        ? Results.Ok(new { calibration = controller.Status })
+        : Results.BadRequest(new { error = result.Error ?? "Unable to change simulation", calibration = controller.Status });
+});
+
 // POST /solve — on-demand solve: demo pulse (?demo=1) or uploaded image
 app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, WebSocketBroadcaster ws, OnStepClient onstep, IOptions<StepSolveOptions> opts, ILogger<Program> logger) =>
 {
@@ -458,6 +474,7 @@ app.Run();
 
 // Request DTOs
 record ModeRequest(string? Mode);
+record SimulationRequest(bool Enabled);
 record StartAlignmentRequest(bool Confirmed);
 
 // Update check state — populated once at startup, read by /system/update/check

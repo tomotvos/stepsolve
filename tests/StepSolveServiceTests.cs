@@ -49,6 +49,40 @@ public class StepSolveServiceTests
         public Task WaitForSolveAsync(CancellationToken ct) => _solved.Task.WaitAsync(ct);
     }
 
+    private sealed class StubCalibration : IOnStepCalibrationSession
+    {
+        private readonly TaskCompletionSource _submitted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int SimulatedSolveCount { get; private set; }
+        public SolveResult? Submitted { get; private set; }
+
+        public OnStepCalibrationStatus Status { get; private set; } = new(
+            "AwaitingStableSolves", true, true, true, "simulation", 1, 1, 0, 45, null, null, null);
+        public bool NeedsFreshSolve => true;
+        public bool UsesSimulatedSolves => true;
+
+        public Task InitializeAsync(CancellationToken ct) => Task.CompletedTask;
+        public Task TickAsync(CancellationToken ct) => Task.CompletedTask;
+        public Task<CalibrationActionResult> StartAsync(bool confirmed, string currentMode, CancellationToken ct) => Task.FromResult(new CalibrationActionResult(true, null));
+        public Task<CalibrationActionResult> AcceptAsync(string currentMode, CancellationToken ct) => Task.FromResult(new CalibrationActionResult(true, null));
+        public Task<CalibrationActionResult> AbortAsync(string currentMode, CancellationToken ct) => Task.FromResult(new CalibrationActionResult(true, null));
+        public Task<CalibrationActionResult> SetSimulationAsync(bool enabled, string currentMode, CancellationToken ct) => Task.FromResult(new CalibrationActionResult(true, null));
+
+        public Task<SolveResult> CreateSimulatedSolveAsync(CancellationToken ct)
+        {
+            SimulatedSolveCount++;
+            return Task.FromResult(new SolveResult(180, 45, null, null, 0.99, TimeSpan.Zero, "onstep-simulation"));
+        }
+
+        public Task SubmitFreshSolveAsync(SolveResult result, CancellationToken ct)
+        {
+            Submitted = result;
+            _submitted.TrySetResult();
+            return Task.CompletedTask;
+        }
+
+        public Task WaitForSubmissionAsync(CancellationToken ct) => _submitted.Task.WaitAsync(ct);
+    }
+
     private static IConfiguration CreateConfig(string mode = "solve")
     {
         return new ConfigurationBuilder()
@@ -171,6 +205,30 @@ public class StepSolveServiceTests
         Assert.Equal(0, camera.CaptureCount);
         Assert.Equal(0, solver.SolveCount);
         Assert.Equal("idle", state.Current.State);
+    }
+
+    [Fact]
+    public async Task CalibrateMode_WithSimulation_UsesNoCameraOrSolver()
+    {
+        var state = new SolveState();
+        var camera = new StubCamera();
+        var solver = new StubSolver();
+        var calibration = new StubCalibration();
+        var service = new StepSolveService(camera, solver, state, CreateOnStepClient(), new WebSocketBroadcaster(),
+            CreateConfig("calibrate"), NullLogger<StepSolveService>.Instance, calibration);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            await service.StartAsync(cts.Token);
+            await calibration.WaitForSubmissionAsync(cts.Token);
+        }
+        finally { await service.StopAsync(CancellationToken.None); }
+
+        Assert.Equal(0, camera.CaptureCount);
+        Assert.Equal(0, solver.SolveCount);
+        Assert.True(calibration.SimulatedSolveCount > 0);
+        Assert.Equal("onstep-simulation", calibration.Submitted?.SolverName);
     }
 }
 

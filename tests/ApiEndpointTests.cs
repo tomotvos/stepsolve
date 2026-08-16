@@ -154,6 +154,17 @@ public class ApiEndpointTests
                                 : Results.BadRequest(new { error = result.Error, calibration = controller.Status });
                         });
 
+                        endpoints.MapPost("/onstep/calibration/simulation", async (SimulationRequest? request, IOptionsMonitor<StepSolveOptions> options, IOnStepCalibrationController controller, HttpContext ctx) =>
+                        {
+                            if (request == null)
+                                return Results.BadRequest(new { error = "Expected a simulation enabled value" });
+
+                            var result = await controller.SetSimulationAsync(request.Enabled, options.CurrentValue.Mode, ctx.RequestAborted);
+                            return result.Success
+                                ? Results.Ok(new { calibration = controller.Status })
+                                : Results.BadRequest(new { error = result.Error, calibration = controller.Status });
+                        });
+
                         endpoints.MapGet("/solve/image", (SolveState state) =>
                         {
                             var path = state.LastImagePath;
@@ -327,6 +338,34 @@ public class ApiEndpointTests
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var json = await response.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal("moving", json.GetProperty("calibration").GetProperty("state").GetString());
+        }
+        finally
+        {
+            await host.StopAsync();
+            host.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task PostOnStepSimulation_IsSessionOnlyAndRequiresCalibrateMode()
+    {
+        var host = CreateTestHost();
+        await host.StartAsync();
+        try
+        {
+            var client = host.GetTestServer().CreateClient();
+            var payload = new StringContent("{\"enabled\":true}", Encoding.UTF8, "application/json");
+            var rejected = await client.PostAsync("/onstep/calibration/simulation", payload);
+            Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+
+            var configuration = host.Services.GetRequiredService<IConfiguration>();
+            configuration["StepSolve:Mode"] = "calibrate";
+            host.Services.GetRequiredService<IOptionsMonitorCache<StepSolveOptions>>().TryRemove(Options.DefaultName);
+            var accepted = await client.PostAsync("/onstep/calibration/simulation", new StringContent("{\"enabled\":true}", Encoding.UTF8, "application/json"));
+
+            Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+            var json = await accepted.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.True(json.GetProperty("calibration").GetProperty("simulationEnabled").GetBoolean());
         }
         finally
         {
@@ -542,6 +581,7 @@ public class ApiEndpointTests
 
 record ModeRequest(string? Mode);
 record StartAlignmentRequest(bool Confirmed);
+record SimulationRequest(bool Enabled);
 
 sealed class TestCalibrationController : IOnStepCalibrationController
 {
@@ -549,6 +589,7 @@ sealed class TestCalibrationController : IOnStepCalibrationController
         State: "idle",
         IsConnected: true,
         IsSafe: true,
+        SimulationEnabled: false,
         Message: "Ready to align",
         CurrentPoint: 0,
         Attempt: 0,
@@ -577,6 +618,15 @@ sealed class TestCalibrationController : IOnStepCalibrationController
     public Task<CalibrationActionResult> AbortAsync(string currentMode, CancellationToken ct)
     {
         _status = _status with { State = "aborted", Message = "Alignment aborted" };
+        return Task.FromResult(new CalibrationActionResult(true, null));
+    }
+
+    public Task<CalibrationActionResult> SetSimulationAsync(bool enabled, string currentMode, CancellationToken ct)
+    {
+        if (!string.Equals(currentMode, "calibrate", StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult(new CalibrationActionResult(false, "Calibrate mode is required"));
+
+        _status = _status with { SimulationEnabled = enabled };
         return Task.FromResult(new CalibrationActionResult(true, null));
     }
 }

@@ -195,6 +195,17 @@ details summary {
     line-height: 1.4;
 }
 
+.calibration-simulation {
+    display: block;
+    margin-top: 0.75rem;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+}
+
+.calibration-simulation input {
+    margin-right: 0.4rem;
+}
+
 .calibration-actions {
     display: flex;
     flex-wrap: wrap;

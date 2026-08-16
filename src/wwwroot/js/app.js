@@ -37,6 +37,7 @@
         calibrationCandidate: document.getElementById('calibration-candidate'),
         calibrationReply: document.getElementById('calibration-reply'),
         calibrationMessage: document.getElementById('calibration-message'),
+        calibrationSimulation: document.getElementById('calibration-simulation'),
         calibrationStart: document.getElementById('calibration-start'),
         calibrationAccept: document.getElementById('calibration-accept'),
         calibrationAbort: document.getElementById('calibration-abort'),
@@ -208,6 +209,7 @@
             : '--';
         els.calibrationReply.textContent = calibration.lastReply || '--';
         els.calibrationMessage.textContent = calibration.message || '';
+        els.calibrationSimulation.checked = !!calibration.simulationEnabled;
 
         // These are presentation hints only. The server repeats every safety and
         // operating-mode check before issuing an OnStep command.
@@ -215,6 +217,8 @@
         els.calibrationStart.disabled = !isCalibrateMode || !calibration.isConnected || !calibration.isSafe;
         els.calibrationAccept.disabled = !isCalibrateMode || calibration.candidateRaDeg == null || calibration.candidateDecDeg == null;
         els.calibrationAbort.disabled = !isCalibrateMode || !calibration.state || calibration.state.toLowerCase() === 'idle';
+        els.calibrationSimulation.disabled = !isCalibrateMode ||
+            ['startingalignment', 'gotopoint', 'waitingforgoto', 'settling', 'awaitingstablesolves', 'awaitingacceptance', 'acceptingpoint'].indexOf((calibration.state || '').toLowerCase()) >= 0;
     }
 
     function loadCalibrationStatus() {
@@ -457,6 +461,12 @@
     els.calibrationAbort.addEventListener('click', function () {
         if (!window.confirm('Abort the OnStep alignment sequence?')) return;
         requestCalibrationAction('/onstep/alignment/abort', null, 'OnStep alignment aborted');
+    });
+
+    els.calibrationSimulation.addEventListener('change', function () {
+        requestCalibrationAction('/onstep/calibration/simulation',
+            { enabled: els.calibrationSimulation.checked },
+            els.calibrationSimulation.checked ? 'OnStep simulation enabled' : 'OnStep simulation disabled');
     });
 
     els.logPause.addEventListener('click', function () {

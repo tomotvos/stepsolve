@@ -54,6 +54,40 @@ public sealed class OnStepCalibrationControllerTests
     }
 
     [Fact]
+    public async Task Simulation_IsTemporaryAndCreatesStableSolvesFromOnStepPosition()
+    {
+        await using var mount = new MockOnStep();
+        var controller = CreateController(new OnStepOptions
+        {
+            Enabled = true,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+            CalibrationSettleSeconds = 0,
+            StableSolveIntervalSeconds = 0,
+        });
+
+        Assert.True((await controller.SetSimulationAsync(true, "calibrate", CancellationToken.None)).Success);
+        Assert.True(controller.Status.SimulationEnabled);
+        Assert.True((await controller.StartAsync(true, "calibrate", CancellationToken.None)).Success);
+        await controller.TickAsync(CancellationToken.None);
+        await controller.TickAsync(CancellationToken.None);
+
+        var first = await controller.CreateSimulatedSolveAsync(CancellationToken.None);
+        var second = await controller.CreateSimulatedSolveAsync(CancellationToken.None);
+        Assert.Equal("onstep-simulation", first.SolverName);
+        Assert.InRange(first.RaDeg, 179.99, 180.01);
+        Assert.InRange(second.DecDeg, 44.99, 45.01);
+
+        await controller.SubmitFreshSolveAsync(first, CancellationToken.None);
+        await controller.SubmitFreshSolveAsync(second, CancellationToken.None);
+        Assert.Equal("AwaitingAcceptance", controller.Status.State);
+
+        var commands = await mount.StopAsync();
+        Assert.Contains(":GR#", commands);
+        Assert.Contains(":GD#", commands);
+    }
+
+    [Fact]
     public async Task ThreePointFlow_RequiresTwoFreshSolvesAndExplicitApproval()
     {
         await using var mount = new MockOnStep();
@@ -201,6 +235,8 @@ public sealed class OnStepCalibrationControllerTests
             ":GVP#" => "OnStepX#",
             ":GVN#" => "1.0#",
             ":GU#" => "N#",
+            ":GR#" => "12:00:00#",
+            ":GD#" => "+45*00:00#",
             ":A3#" => "1",
             ":A?#" => "321#",
             ":MS#" => "0",

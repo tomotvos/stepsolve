@@ -23,6 +23,8 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
     private SolveResult? _firstStableSolve;
     private DateTimeOffset _firstStableSolveAt;
     private SolveResult? _candidate;
+    private bool _simulationEnabled;
+    private int _simulationSample;
 
     public OnStepCalibrationController(
         OnStepClient onstep,
@@ -37,6 +39,53 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
     public OnStepCalibrationStatus Status => Volatile.Read(ref _status);
 
     public bool NeedsFreshSolve => Status.State == "AwaitingStableSolves";
+    public bool UsesSimulatedSolves => _simulationEnabled && NeedsFreshSolve;
+
+    public async Task<CalibrationActionResult> SetSimulationAsync(bool enabled, string currentMode, CancellationToken ct)
+    {
+        if (!IsCalibrateMode(currentMode))
+            return new(false, "Simulation can only be changed in Calibrate mode.");
+
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (IsActive(Status.State))
+                return new(false, "Simulation cannot be changed while an alignment session is active.");
+
+            _simulationEnabled = enabled;
+            _simulationSample = 0;
+            SetStatus(Status.State, Status.IsConnected, Status.IsSafe,
+                enabled
+                    ? "Simulation enabled for the next alignment session. Simulated solves use OnStep's reported position."
+                    : "Simulation disabled. Calibration will use fresh camera plate solves.",
+                Status.LastReply);
+            return new(true, null);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<SolveResult> CreateSimulatedSolveAsync(CancellationToken ct)
+    {
+        if (!UsesSimulatedSolves)
+            throw new InvalidOperationException("Simulated solves are not enabled for the active calibration state.");
+
+        var reported = await _onstep.GetPositionAsync(ct);
+        // Deterministic, very small opposing offsets let the existing stability
+        // gate execute exactly as it would with two real fresh plate solves.
+        var offset = Interlocked.Increment(ref _simulationSample) % 2 == 0 ? -0.004 : 0.004;
+        var dec = Math.Clamp(reported.DecDeg - offset, -89.999, 89.999);
+        return new SolveResult(
+            reported.RaDeg + offset,
+            dec,
+            RollDeg: null,
+            PlateScaleArcsecPerPx: null,
+            Confidence: 0.99,
+            SolveTime: TimeSpan.Zero,
+            SolverName: "onstep-simulation");
+    }
 
     public async Task InitializeAsync(CancellationToken ct)
     {
@@ -136,6 +185,7 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
                 _attempt = 1;
                 _firstStableSolve = null;
                 _candidate = null;
+                _simulationSample = 0;
                 SetStatus("StartingAlignment", true, true,
                     $"Connected to {identity.Product} {identity.FirmwareVersion}; starting point 1.", started.Response);
 
@@ -422,6 +472,7 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
             state,
             connected,
             safe,
+            _simulationEnabled,
             message,
             _targets.Count > 0 && _pointIndex < _targets.Count ? _pointIndex + 1 : 0,
             _targets.Count > 0 && _pointIndex < _targets.Count ? _attempt : 0,
@@ -433,7 +484,7 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
     }
 
     private static OnStepCalibrationStatus IdleStatus() =>
-        new("Idle", false, false, "OnStep alignment has not started.", 0, 0, null, null, null, null, null);
+        new("Idle", false, false, false, "OnStep alignment has not started.", 0, 0, null, null, null, null, null);
 
     private static bool IsCalibrateMode(string mode) =>
         string.Equals(mode, "calibrate", StringComparison.OrdinalIgnoreCase);

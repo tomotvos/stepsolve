@@ -195,6 +195,21 @@ public sealed class StepSolveService : BackgroundService
         if (_calibration != null)
             await _calibration.TickAsync(ct);
 
+        // Simulation is intentionally a session-only calibration aid. It uses
+        // the real mount's reported position but never invokes camera hardware
+        // or the configured solver, so it works on development machines too.
+        if (_calibration?.UsesSimulatedSolves == true)
+        {
+            _state.SetState("solving");
+            _ = _ws.BroadcastStatus(CurrentMode, "solving", _onstep);
+            var simulated = await _calibration.CreateSimulatedSolveAsync(ct);
+            _state.UpdateResult(simulated);
+            _ = _ws.BroadcastSolve(simulated, hasImage: false);
+            await _calibration.SubmitFreshSolveAsync(simulated, ct);
+            _state.SetState("idle");
+            return;
+        }
+
         if (!OperatingSystem.IsLinux())
         {
             _state.SetState("idle");

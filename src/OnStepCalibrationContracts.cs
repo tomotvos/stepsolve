@@ -8,6 +8,7 @@ public sealed record OnStepCalibrationStatus(
     string State,
     bool IsConnected,
     bool IsSafe,
+    bool SimulationEnabled,
     string? Message,
     int CurrentPoint,
     int Attempt,
@@ -35,6 +36,7 @@ public interface IOnStepCalibrationController
     Task<CalibrationActionResult> StartAsync(bool confirmed, string currentMode, CancellationToken ct);
     Task<CalibrationActionResult> AcceptAsync(string currentMode, CancellationToken ct);
     Task<CalibrationActionResult> AbortAsync(string currentMode, CancellationToken ct);
+    Task<CalibrationActionResult> SetSimulationAsync(bool enabled, string currentMode, CancellationToken ct);
 }
 
 /// <summary>
@@ -45,8 +47,10 @@ public interface IOnStepCalibrationController
 public interface IOnStepCalibrationSession : IOnStepCalibrationController
 {
     bool NeedsFreshSolve { get; }
+    bool UsesSimulatedSolves { get; }
 
     Task InitializeAsync(CancellationToken ct);
     Task TickAsync(CancellationToken ct);
     Task SubmitFreshSolveAsync(SolveResult result, CancellationToken ct);
+    Task<SolveResult> CreateSimulatedSolveAsync(CancellationToken ct);
 }
