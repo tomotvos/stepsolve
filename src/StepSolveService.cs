@@ -61,6 +61,13 @@ public sealed class StepSolveService : BackgroundService
         {
             var mode = CurrentMode;
 
+            // Configuration is hot-reloaded. This is intentionally safe to run
+            // every loop: the controller only probes at startup, when its OnStep
+            // endpoint/settings change, or after a bounded failed-probe retry.
+            // It never moves or synchronizes the mount.
+            if (_calibration != null)
+                await _calibration.InitializeAsync(stoppingToken);
+
             if (mode != prevMode)
             {
                 prevMode = mode;
@@ -94,7 +101,13 @@ public sealed class StepSolveService : BackgroundService
                 _state.SetState("error");
             }
 
-            await Task.Delay(mode == "demo" ? 1000 : 500, stoppingToken);
+            // Once the first high-confidence calibration solve arrives, take
+            // the confirmation frame immediately. A rejected pair imposes its
+            // own controller-managed retry delay instead.
+            var delay = mode == "demo" ? 1000 :
+                mode == "calibrate" && _calibration?.WantsImmediateFollowUpSolve == true ? 0 : 500;
+            if (delay > 0)
+                await Task.Delay(delay, stoppingToken);
         }
 
         _logger.LogInformation("StepSolve service stopped");

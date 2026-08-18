@@ -86,13 +86,16 @@ if (currentVersion != "dev")
 }
 
 // GET /status — current solve state and configuration
-app.MapGet("/status", (SolveState state, IOptionsMonitor<StepSolveOptions> opts, IOptionsMonitor<OnStepOptions> onstepOpts, OnStepClient onstepClient, IOnStepCalibrationController calibrationController) =>
+app.MapGet("/status", (SolveState state, IConfiguration config, IOptionsMonitor<OnStepOptions> onstepOpts, OnStepClient onstepClient, IOnStepCalibrationController calibrationController) =>
 {
     var (result, timestamp, currentState) = state.Current;
     return Results.Ok(new
     {
         version = currentVersion,
-        mode = opts.CurrentValue.Mode,
+        // /mode updates the live IConfiguration value. IOptionsMonitor does
+        // not refresh for an in-memory configuration set, so this must match
+        // the source read by StepSolveService.
+        mode = (config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(),
         state = currentState,
         ra = result?.RaDeg,
         dec = result?.DecDeg,
@@ -180,40 +183,51 @@ app.MapPost("/settings", async (HttpContext ctx, SettingsService settingsSvc) =>
 app.MapGet("/onstep/calibration", (IOnStepCalibrationController controller) =>
     Results.Ok(controller.Status));
 
+app.MapPost("/onstep/calibration/reconnect", async (
+    IConfiguration config,
+    IOnStepCalibrationController controller,
+    HttpContext ctx) =>
+{
+    var result = await controller.ReconnectAsync((config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(), ctx.RequestAborted);
+    return result.Success
+        ? Results.Ok(new { calibration = controller.Status })
+        : Results.BadRequest(new { error = result.Error ?? "Unable to reconnect to OnStep", calibration = controller.Status });
+});
+
 // Alignment mutations are deliberately separate from mode and settings changes.
 // The controller owns the connection, mount-safety, and Calibrate-mode guards.
 app.MapPost("/onstep/alignment/start", async (
     StartAlignmentRequest? request,
-    IOptionsMonitor<StepSolveOptions> options,
+    IConfiguration config,
     IOnStepCalibrationController controller,
     HttpContext ctx) =>
 {
     if (request?.Confirmed != true)
         return Results.BadRequest(new { error = "Starting alignment requires explicit confirmation" });
 
-    var result = await controller.StartAsync(request.Confirmed, options.CurrentValue.Mode, ctx.RequestAborted);
+    var result = await controller.StartAsync(request.Confirmed, (config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(), ctx.RequestAborted);
     return result.Success
         ? Results.Ok(new { calibration = controller.Status })
         : Results.BadRequest(new { error = result.Error ?? "Unable to start alignment", calibration = controller.Status });
 });
 
 app.MapPost("/onstep/alignment/accept", async (
-    IOptionsMonitor<StepSolveOptions> options,
+    IConfiguration config,
     IOnStepCalibrationController controller,
     HttpContext ctx) =>
 {
-    var result = await controller.AcceptAsync(options.CurrentValue.Mode, ctx.RequestAborted);
+    var result = await controller.AcceptAsync((config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(), ctx.RequestAborted);
     return result.Success
         ? Results.Ok(new { calibration = controller.Status })
         : Results.BadRequest(new { error = result.Error ?? "Unable to accept calibration point", calibration = controller.Status });
 });
 
 app.MapPost("/onstep/alignment/abort", async (
-    IOptionsMonitor<StepSolveOptions> options,
+    IConfiguration config,
     IOnStepCalibrationController controller,
     HttpContext ctx) =>
 {
-    var result = await controller.AbortAsync(options.CurrentValue.Mode, ctx.RequestAborted);
+    var result = await controller.AbortAsync((config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(), ctx.RequestAborted);
     return result.Success
         ? Results.Ok(new { calibration = controller.Status })
         : Results.BadRequest(new { error = result.Error ?? "Unable to abort alignment", calibration = controller.Status });
@@ -222,14 +236,14 @@ app.MapPost("/onstep/alignment/abort", async (
 // Simulation is deliberately session-only: it is never persisted in settings.
 app.MapPost("/onstep/calibration/simulation", async (
     SimulationRequest? request,
-    IOptionsMonitor<StepSolveOptions> options,
+    IConfiguration config,
     IOnStepCalibrationController controller,
     HttpContext ctx) =>
 {
     if (request == null)
         return Results.BadRequest(new { error = "Expected a simulation enabled value" });
 
-    var result = await controller.SetSimulationAsync(request.Enabled, options.CurrentValue.Mode, ctx.RequestAborted);
+    var result = await controller.SetSimulationAsync(request.Enabled, (config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(), ctx.RequestAborted);
     return result.Success
         ? Results.Ok(new { calibration = controller.Status })
         : Results.BadRequest(new { error = result.Error ?? "Unable to change simulation", calibration = controller.Status });

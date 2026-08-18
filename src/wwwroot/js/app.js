@@ -39,6 +39,7 @@
         calibrationMessage: document.getElementById('calibration-message'),
         calibrationSimulation: document.getElementById('calibration-simulation'),
         calibrationStart: document.getElementById('calibration-start'),
+        calibrationReconnect: document.getElementById('calibration-reconnect'),
         calibrationAccept: document.getElementById('calibration-accept'),
         calibrationAbort: document.getElementById('calibration-abort'),
         logContainer: document.getElementById('log-container'),
@@ -197,7 +198,10 @@
         if (!calibration) return;
 
         els.calibrationState.textContent = calibration.state || '--';
-        els.calibrationConnection.textContent = calibration.isConnected ? (calibration.isSafe ? 'Connected / safe' : 'Connected / unsafe') : 'Not connected';
+        var completedSession = (calibration.state || '').toLowerCase() === 'completed';
+        els.calibrationConnection.textContent = calibration.isConnected
+            ? (calibration.isSafe ? 'Connected / safe' : 'Connected / unsafe')
+            : (completedSession ? 'Disconnected (session complete)' : 'Not connected');
         els.calibrationTarget.textContent = calibration.requestedAzimuthDeg != null && calibration.requestedAltitudeDeg != null
             ? 'Az ' + calibration.requestedAzimuthDeg.toFixed(1) + '\u00B0, Alt ' + calibration.requestedAltitudeDeg.toFixed(1) + '\u00B0'
             : '--';
@@ -214,11 +218,24 @@
         // These are presentation hints only. The server repeats every safety and
         // operating-mode check before issuing an OnStep command.
         var isCalibrateMode = state.mode === 'calibrate';
-        els.calibrationStart.disabled = !isCalibrateMode || !calibration.isConnected || !calibration.isSafe;
-        els.calibrationAccept.disabled = !isCalibrateMode || calibration.candidateRaDeg == null || calibration.candidateDecDeg == null;
-        els.calibrationAbort.disabled = !isCalibrateMode || !calibration.state || calibration.state.toLowerCase() === 'idle';
+        var calibrationState = (calibration.state || '').toLowerCase();
+        var activeAlignmentStates = [
+            'returninghome', 'startingalignment', 'gotopoint', 'waitingforgoto', 'settling',
+            'awaitingstablesolves', 'awaitingacceptance', 'acceptingpoint'
+        ];
+        var alignmentIsActive = activeAlignmentStates.indexOf(calibrationState) >= 0;
+        // A new session always performs a fresh server-side probe and safety
+        // check. Keep Start available after a completed session has closed its
+        // intentionally short-lived TCP connection.
+        els.calibrationStart.disabled = !isCalibrateMode || alignmentIsActive ||
+            ((calibration.state || '').toLowerCase() === 'idle' && (!calibration.isConnected || !calibration.isSafe));
+        els.calibrationReconnect.disabled = !isCalibrateMode || alignmentIsActive;
+        els.calibrationAccept.disabled = !isCalibrateMode || !alignmentIsActive ||
+            calibrationState !== 'awaitingacceptance' ||
+            calibration.candidateRaDeg == null || calibration.candidateDecDeg == null;
+        els.calibrationAbort.disabled = !isCalibrateMode || !alignmentIsActive;
         els.calibrationSimulation.disabled = !isCalibrateMode ||
-            ['startingalignment', 'gotopoint', 'waitingforgoto', 'settling', 'awaitingstablesolves', 'awaitingacceptance', 'acceptingpoint'].indexOf((calibration.state || '').toLowerCase()) >= 0;
+            alignmentIsActive;
     }
 
     function loadCalibrationStatus() {
@@ -261,7 +278,10 @@
 
         var timeSpan = document.createElement('span');
         timeSpan.className = 'log-time';
-        timeSpan.textContent = formatTime(timestamp);
+        // Server log messages carry timestamps; locally generated dashboard
+        // messages (for example an accepted/rejected calibration action) do
+        // not, so timestamp those at the point they are displayed.
+        timeSpan.textContent = formatTime(timestamp || new Date().toISOString());
 
         var levelSpan = document.createElement('span');
         levelSpan.className = 'log-level';
@@ -449,12 +469,16 @@
     }
 
     els.calibrationStart.addEventListener('click', function () {
-        if (!window.confirm('Start the OnStep three-point alignment sequence? The mount will move to its first configured target.')) return;
+        if (!window.confirm('Start the OnStep three-point alignment sequence? The mount will first return physically to Home (0,0), then move to its first configured target.')) return;
         requestCalibrationAction('/onstep/alignment/start', { confirmed: true }, 'OnStep alignment started');
     });
 
+    els.calibrationReconnect.addEventListener('click', function () {
+        requestCalibrationAction('/onstep/calibration/reconnect', null, 'OnStep reconnect requested');
+    });
+
     els.calibrationAccept.addEventListener('click', function () {
-        if (!window.confirm('Approve this plate-solved point and submit it to OnStep?')) return;
+        // if (!window.confirm('Approve this plate-solved point and submit it to OnStep?')) return;
         requestCalibrationAction('/onstep/alignment/accept', null, 'OnStep calibration point approved');
     });
 

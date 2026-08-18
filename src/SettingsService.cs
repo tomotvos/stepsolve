@@ -64,6 +64,14 @@ public sealed class SettingsService
 
         // Persist to disk
         Persist(settings);
+
+        // Assigning IConfiguration values updates the immediate request path,
+        // but does not reliably signal IOptionsMonitor subscribers. Reload now
+        // that the runtime JSON file contains the authoritative values so
+        // long-lived services (camera, solver, and OnStep) react without a
+        // process restart.
+        if (_config is IConfigurationRoot configurationRoot)
+            configurationRoot.Reload();
         return null;
     }
 

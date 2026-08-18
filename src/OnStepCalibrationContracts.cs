@@ -36,6 +36,7 @@ public interface IOnStepCalibrationController
     Task<CalibrationActionResult> StartAsync(bool confirmed, string currentMode, CancellationToken ct);
     Task<CalibrationActionResult> AcceptAsync(string currentMode, CancellationToken ct);
     Task<CalibrationActionResult> AbortAsync(string currentMode, CancellationToken ct);
+    Task<CalibrationActionResult> ReconnectAsync(string currentMode, CancellationToken ct);
     Task<CalibrationActionResult> SetSimulationAsync(bool enabled, string currentMode, CancellationToken ct);
 }
 
@@ -47,6 +48,7 @@ public interface IOnStepCalibrationController
 public interface IOnStepCalibrationSession : IOnStepCalibrationController
 {
     bool NeedsFreshSolve { get; }
+    bool WantsImmediateFollowUpSolve { get; }
     bool UsesSimulatedSolves { get; }
 
     Task InitializeAsync(CancellationToken ct);

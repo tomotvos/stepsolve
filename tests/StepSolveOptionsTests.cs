@@ -1,4 +1,5 @@
 using StepSolve;
+using Microsoft.Extensions.Configuration;
 
 namespace StepSolve.Tests;
 
@@ -52,10 +53,34 @@ public class StepSolveOptionsTests
         Assert.False(opts.Enabled);
         Assert.Equal("localhost", opts.Host);
         Assert.Equal(9998, opts.Port);
+        Assert.Equal(10, opts.CommandTimeoutSeconds);
         Assert.Equal("sync", opts.SyncMode);
         Assert.Equal(5.0, opts.MaxSyncDeltaDeg);
         Assert.Equal("probe", opts.StartupPolicy);
         Assert.Equal("validate", opts.BackgroundPolicy);
+        Assert.Equal(1, opts.StableSolveIntervalSeconds);
+        Assert.Equal(3, opts.CalibrationSettleSeconds);
+        Assert.Empty(opts.CalibrationTargets);
+    }
+
+    [Fact]
+    public void OnStepOptions_ConfigurationBindingUsesConfiguredTargetsWithoutDuplication()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["OnStep:CalibrationTargets:0:AzimuthDeg"] = "0",
+                ["OnStep:CalibrationTargets:0:AltitudeDeg"] = "45",
+                ["OnStep:CalibrationTargets:1:AzimuthDeg"] = "60",
+                ["OnStep:CalibrationTargets:1:AltitudeDeg"] = "60",
+                ["OnStep:CalibrationTargets:2:AzimuthDeg"] = "90",
+                ["OnStep:CalibrationTargets:2:AltitudeDeg"] = "80",
+            })
+            .Build();
+
+        var opts = config.GetSection(OnStepOptions.Section).Get<OnStepOptions>();
+
+        Assert.NotNull(opts);
         Assert.Collection(opts.CalibrationTargets,
             target => Assert.Equal(new OnStepCalibrationTarget(0, 45), target),
             target => Assert.Equal(new OnStepCalibrationTarget(60, 60), target),

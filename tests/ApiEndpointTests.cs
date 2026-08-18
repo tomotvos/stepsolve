@@ -52,12 +52,12 @@ public class ApiEndpointTests
                     app.UseRouting();
                     app.UseEndpoints(endpoints =>
                     {
-                        endpoints.MapGet("/status", (SolveState state, IOptionsMonitor<StepSolveOptions> opts, IOptionsMonitor<OnStepOptions> onstepOpts, OnStepClient onstepClient, IOnStepCalibrationController calibrationController) =>
+                        endpoints.MapGet("/status", (SolveState state, IConfiguration config, IOptionsMonitor<OnStepOptions> onstepOpts, OnStepClient onstepClient, IOnStepCalibrationController calibrationController) =>
                         {
                             var (result, timestamp, currentState) = state.Current;
                             return Results.Ok(new
                             {
-                                mode = opts.CurrentValue.Mode,
+                                mode = (config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(),
                                 state = currentState,
                                 ra = result?.RaDeg,
                                 dec = result?.DecDeg,
@@ -127,39 +127,47 @@ public class ApiEndpointTests
                         endpoints.MapGet("/onstep/calibration", (IOnStepCalibrationController controller) =>
                             Results.Ok(controller.Status));
 
-                        endpoints.MapPost("/onstep/alignment/start", async (StartAlignmentRequest? request, IOptionsMonitor<StepSolveOptions> options, IOnStepCalibrationController controller, HttpContext ctx) =>
+                        endpoints.MapPost("/onstep/calibration/reconnect", async (IConfiguration config, IOnStepCalibrationController controller, HttpContext ctx) =>
+                        {
+                            var result = await controller.ReconnectAsync((config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(), ctx.RequestAborted);
+                            return result.Success
+                                ? Results.Ok(new { calibration = controller.Status })
+                                : Results.BadRequest(new { error = result.Error, calibration = controller.Status });
+                        });
+
+                        endpoints.MapPost("/onstep/alignment/start", async (StartAlignmentRequest? request, IConfiguration config, IOnStepCalibrationController controller, HttpContext ctx) =>
                         {
                             if (request?.Confirmed != true)
                                 return Results.BadRequest(new { error = "Starting alignment requires explicit confirmation" });
 
-                            var result = await controller.StartAsync(request.Confirmed, options.CurrentValue.Mode, ctx.RequestAborted);
+                            var result = await controller.StartAsync(request.Confirmed, (config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(), ctx.RequestAborted);
                             return result.Success
                                 ? Results.Ok(new { calibration = controller.Status })
                                 : Results.BadRequest(new { error = result.Error, calibration = controller.Status });
                         });
 
-                        endpoints.MapPost("/onstep/alignment/accept", async (IOptionsMonitor<StepSolveOptions> options, IOnStepCalibrationController controller, HttpContext ctx) =>
+                        endpoints.MapPost("/onstep/alignment/accept", async (IConfiguration config, IOnStepCalibrationController controller, HttpContext ctx) =>
                         {
-                            var result = await controller.AcceptAsync(options.CurrentValue.Mode, ctx.RequestAborted);
+                            var result = await controller.AcceptAsync((config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(), ctx.RequestAborted);
                             return result.Success
                                 ? Results.Ok(new { calibration = controller.Status })
                                 : Results.BadRequest(new { error = result.Error, calibration = controller.Status });
                         });
 
-                        endpoints.MapPost("/onstep/alignment/abort", async (IOptionsMonitor<StepSolveOptions> options, IOnStepCalibrationController controller, HttpContext ctx) =>
+                        endpoints.MapPost("/onstep/alignment/abort", async (IConfiguration config, IOnStepCalibrationController controller, HttpContext ctx) =>
                         {
-                            var result = await controller.AbortAsync(options.CurrentValue.Mode, ctx.RequestAborted);
+                            var result = await controller.AbortAsync((config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(), ctx.RequestAborted);
                             return result.Success
                                 ? Results.Ok(new { calibration = controller.Status })
                                 : Results.BadRequest(new { error = result.Error, calibration = controller.Status });
                         });
 
-                        endpoints.MapPost("/onstep/calibration/simulation", async (SimulationRequest? request, IOptionsMonitor<StepSolveOptions> options, IOnStepCalibrationController controller, HttpContext ctx) =>
+                        endpoints.MapPost("/onstep/calibration/simulation", async (SimulationRequest? request, IConfiguration config, IOnStepCalibrationController controller, HttpContext ctx) =>
                         {
                             if (request == null)
                                 return Results.BadRequest(new { error = "Expected a simulation enabled value" });
 
-                            var result = await controller.SetSimulationAsync(request.Enabled, options.CurrentValue.Mode, ctx.RequestAborted);
+                            var result = await controller.SetSimulationAsync(request.Enabled, (config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(), ctx.RequestAborted);
                             return result.Success
                                 ? Results.Ok(new { calibration = controller.Status })
                                 : Results.BadRequest(new { error = result.Error, calibration = controller.Status });
@@ -354,13 +362,16 @@ public class ApiEndpointTests
         try
         {
             var client = host.GetTestServer().CreateClient();
+            // The dashboard has already fetched status before the user changes
+            // modes, which previously left the API guard on a cached idle option.
+            await client.GetAsync("/status");
+
             var payload = new StringContent("{\"enabled\":true}", Encoding.UTF8, "application/json");
             var rejected = await client.PostAsync("/onstep/calibration/simulation", payload);
             Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
 
-            var configuration = host.Services.GetRequiredService<IConfiguration>();
-            configuration["StepSolve:Mode"] = "calibrate";
-            host.Services.GetRequiredService<IOptionsMonitorCache<StepSolveOptions>>().TryRemove(Options.DefaultName);
+            var setMode = await client.PostAsync("/mode", new StringContent("{\"mode\":\"calibrate\"}", Encoding.UTF8, "application/json"));
+            Assert.Equal(HttpStatusCode.OK, setMode.StatusCode);
             var accepted = await client.PostAsync("/onstep/calibration/simulation", new StringContent("{\"enabled\":true}", Encoding.UTF8, "application/json"));
 
             Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
@@ -618,6 +629,15 @@ sealed class TestCalibrationController : IOnStepCalibrationController
     public Task<CalibrationActionResult> AbortAsync(string currentMode, CancellationToken ct)
     {
         _status = _status with { State = "aborted", Message = "Alignment aborted" };
+        return Task.FromResult(new CalibrationActionResult(true, null));
+    }
+
+    public Task<CalibrationActionResult> ReconnectAsync(string currentMode, CancellationToken ct)
+    {
+        if (!string.Equals(currentMode, "calibrate", StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult(new CalibrationActionResult(false, "Calibrate mode is required"));
+
+        _status = _status with { State = "idle", IsConnected = false, IsSafe = false, Message = "Reconnect requested" };
         return Task.FromResult(new CalibrationActionResult(true, null));
     }
 

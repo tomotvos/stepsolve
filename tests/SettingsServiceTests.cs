@@ -1,5 +1,7 @@
 using StepSolve;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace StepSolve.Tests;
 
@@ -189,6 +191,36 @@ public class SettingsServiceTests
             svc.ApplyAndPersist(settings);
 
             Assert.Equal("tetra3", config["Solver:Backend"]);
+        }
+        finally
+        {
+            File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
+    public void ApplyAndPersist_ReloadsOnStepOptionsMonitor()
+    {
+        var tempPath = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(tempPath, "{ \"OnStep\": { \"Enabled\": false } }");
+            var config = new ConfigurationBuilder()
+                .AddJsonFile(tempPath, optional: false, reloadOnChange: false)
+                .Build();
+            var services = new ServiceCollection();
+            services.Configure<OnStepOptions>(config.GetSection(OnStepOptions.Section));
+            using var provider = services.BuildServiceProvider();
+            var monitor = provider.GetRequiredService<IOptionsMonitor<OnStepOptions>>();
+            var svc = new SettingsService(config, tempPath);
+
+            Assert.False(monitor.CurrentValue.Enabled);
+            Assert.Null(svc.ApplyAndPersist(new Dictionary<string, Dictionary<string, object>>
+            {
+                ["OnStep"] = new() { ["Enabled"] = true },
+            }));
+
+            Assert.True(monitor.CurrentValue.Enabled);
         }
         finally
         {

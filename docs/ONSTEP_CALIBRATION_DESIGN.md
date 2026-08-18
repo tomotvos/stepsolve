@@ -80,14 +80,19 @@ OnStepX has a manual `n`-star alignment state machine:
 
 ```text
 :A3#               begin a new three-star alignment
-:Sr...# :Sd...# :CM#  accept first solved point
-:Sr...# :Sd...# :CM#  accept second solved point
-:Sr...# :Sd...# :CM#  accept third solved point and build the model
+:Sr...# :Sd...# :A+#  accept first solved point
+:Sr...# :Sd...# :A+#  accept second solved point
+:Sr...# :Sd...# :A+#  accept third solved point and build the model
 ```
 
-While this alignment state is active, OnStepX treats `:CM#` as "add the
-current alignment point." Consequently, StepSolve can supply the solved
-RA/Dec and accept the point without requiring a named star or manual centring.
+`A+#` is OnStep's documented explicit alignment-accept command. StepSolve
+stages the plate-solved RA/Dec before accepting each point, without requiring a
+named star or manual centring. `CM#` remains reserved for a normal one-point
+sync outside this guided alignment workflow.
+
+Before `:A3#`, the V1 workflow sends `:So90#` once to set OnStep's overhead
+limit to 90°. This permits the planned 80° altitude third target. The reply is
+validated and a failed update stops the session before alignment or motion.
 
 Starting `:A3#` resets OnStep's home/alignment basis. The session therefore
 has a non-negotiable precondition: the operator must put the rig at its known
@@ -106,12 +111,12 @@ commands rather than asking the operator to back-drive energized steppers:
 ```text
 :Sa+DD*MM#         set target altitude
 :SzDDD*MM#         set target azimuth
-:MS#               slew to the target
+:MA#               slew to the stored Alt/Az target
 ```
 
 After the controller reports that the GoTo is complete and the rig has settled,
 StepSolve plate-solves the actual pointing, replaces the target with that
-solved RA/Dec using `:Sr`/`:Sd`, and sends `:CM#` to accept the alignment
+solved RA/Dec using `:Sr`/`:Sd`, and sends `:A+#` to accept the alignment
 point. This deliberately makes the solved pointing—not the requested target—
 the alignment truth.
 
@@ -165,7 +170,7 @@ Suggested safe starting values, to tune from field data:
 
 | Setting | Initial value | Reason |
 |---|---:|---|
-| Stable-solve spacing | 5 s | avoids accepting a frame during movement |
+| Stable-solve retry spacing | 1 s | backs off only after two usable solves disagree |
 | Solve agreement | 0.05° (3 arcmin) | rejects transient or bad solves |
 | Minimum correction interval | 15 min | prevents rapid model churn |
 | Minimum sky separation | 15° | avoids repeat corrections at one location |
@@ -197,11 +202,11 @@ This is the recommended first mount-calibration feature.
    OnStep, verifies safe status, asks for a final confirmation, then sends
    `:A3#`.
 3. StepSolve selects point 1 from a fixed, configured safe target plan. It
-   sends `:Sa`, `:Sz`, `:MS#`, waits for OnStep to report no active GoTo, then
+   sends `:Sa`, `:Sz`, `:MA#`, waits for OnStep to report no active GoTo, then
    waits for a configurable settle period.
 4. StepSolve obtains two stable solves, displays the candidate RA/Dec and
    residual, then offers **Accept point 1**. Acceptance sends `:Sr`, `:Sd`,
-   `:CM#` serially and records the replies.
+   `:A+#` serially and records the replies.
 5. Repeat the controlled GoTo/settle/solve/accept sequence for points 2 and
    3. The controller's alignment progress is queried after every acceptance.
 6. On completion, show the three accepted positions, their residuals, OnStep
@@ -250,14 +255,14 @@ Keep the existing connection settings and add explicit policies:
   "StartupPolicy": "probe",
   "BackgroundPolicy": "validate",
   "MinSolveConfidence": 0.90,
-  "StableSolveIntervalSeconds": 5,
+  "StableSolveIntervalSeconds": 1,
   "MaxSolveDisagreementDeg": 0.05,
   "MinCorrectionIntervalMinutes": 15,
   "MinCalibrationSeparationDeg": 15,
   "MaxAutomaticCorrectionDeg": 2.0,
   "MaxAutomaticSyncsPerHour": 4,
   "MaxAutomaticSyncsPerSession": 8,
-  "CalibrationSettleSeconds": 5,
+  "CalibrationSettleSeconds": 3,
   "CalibrationTargetRetryCount": 3,
   "CalibrationTargets": [
     { "azimuthDeg": 0, "altitudeDeg": 45 },
@@ -283,12 +288,18 @@ methods:
 - `ProbeAsync()` — product, firmware, status;
 - `GetPositionAsync()` — parse `:GR#` and `:GD#`;
 - `GetStatusAsync()` — parse `:GU#` into a typed status record;
-- `SyncAsync()` — serial `:Sr`, `:Sd`, `:CM#` with reply validation;
+- `SyncAsync()` — serial `:Sr`, `:Sd`, `:CM#` with reply validation for a
+  normal one-point sync;
+- `AcceptAlignmentPointAsync()` — serial `:Sr`, `:Sd`, `:A+#` with reply
+  validation for an active guided alignment;
 - `StartAlignmentAsync(stars)` and `GetAlignmentProgressAsync()`.
 
 All socket use is serialized with one `SemaphoreSlim`; no calibration command
-may overlap another. Each operation gets a connect timeout, read timeout, and
-structured result containing raw replies for diagnostics.
+may overlap another. The client holds a persistent TCP session while host and
+port remain unchanged, reconnecting only after a transport failure or a
+host/port change. Each exchange gets a timeout and structured result containing
+raw replies for diagnostics; non-idempotent motion and acceptance commands are
+never automatically retried after an uncertain transport failure.
 
 `OnStepCalibrationController` is a new singleton that owns policy, candidate
 state, cooldowns, rate limits, and the assisted alignment state machine. It is
@@ -347,7 +358,7 @@ target if a solve fails.
 - residual calculation using parsed OnStep coordinates;
 - status parsing, especially parked/slewing/guiding/homing/error rejection;
 - `:A3#` session transitions, acceptance, completion, and abort.
-- direct `:Sa`/`:Sz`/`:MS#` target sequencing, completion polling, and settle
+- direct `:Sa`/`:Sz`/`:MA#` target sequencing, completion polling, and settle
   timing;
 - target-envelope rejection, bounded alternate retries, and an abort that
   sends no further motion commands.

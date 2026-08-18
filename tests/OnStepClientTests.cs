@@ -222,6 +222,37 @@ public class OnStepClientTests
     }
 
     [Fact]
+    public async Task ProbeAsync_ReconnectsOnce_WhenAnIdleConnectionWasClosedByOnStep()
+    {
+        var port = FindAvailablePort();
+        using var server = new TcpListener(IPAddress.Loopback, port);
+        server.Start();
+
+        var serverTask = Task.Run(async () =>
+        {
+            // Model a controller that silently closes its idle connection. The next
+            // read-only identity probe must establish a fresh connection.
+            using (var staleClient = await server.AcceptTcpClientAsync())
+            using (var staleStream = staleClient.GetStream())
+                Assert.Equal(":GVP#", await ReadFrameAsync(staleStream));
+
+            using var freshClient = await server.AcceptTcpClientAsync();
+            using var freshStream = freshClient.GetStream();
+            await ReplyToCommandsAsync(freshStream,
+            [
+                (":GVP#", "OnStepX#"),
+                (":GVN#", "5.0.0#"),
+            ]);
+        });
+
+        var identity = await CreateEnabledClient(port).ProbeAsync(CancellationToken.None);
+        await serverTask;
+
+        Assert.Equal("OnStepX", identity.Product);
+        Assert.Equal("5.0.0", identity.FirmwareVersion);
+    }
+
+    [Fact]
     public async Task StatusPositionAndAlignmentProgress_ParseReplies()
     {
         var port = FindAvailablePort();
@@ -230,17 +261,15 @@ public class OnStepClientTests
 
         var serverTask = Task.Run(async () =>
         {
-            for (var connection = 0; connection < 3; connection++)
-            {
-                using var client = await server.AcceptTcpClientAsync();
-                using var stream = client.GetStream();
-                if (connection == 0)
-                    await ReplyToCommandsAsync(stream, [ (":GU#", "pH#") ]);
-                else if (connection == 1)
-                    await ReplyToCommandsAsync(stream, [ (":GR#", "12:00:00#"), (":GD#", "-45*30:00#") ]);
-                else
-                    await ReplyToCommandsAsync(stream, [ (":A?#", "313#") ]);
-            }
+            using var client = await server.AcceptTcpClientAsync();
+            using var stream = client.GetStream();
+            await ReplyToCommandsAsync(stream,
+            [
+                (":GU#", "pH#"),
+                (":GR#", "12:00:00#"),
+                (":GD#", "-45*30:00#"),
+                (":A?#", "313#"),
+            ]);
         });
 
         var onstep = CreateEnabledClient(port);
@@ -260,6 +289,51 @@ public class OnStepClientTests
     }
 
     [Fact]
+    public async Task PersistentConnection_ReconnectsWhenEndpointChanges()
+    {
+        var firstPort = FindAvailablePort();
+        var secondPort = FindAvailablePort();
+        using var firstServer = new TcpListener(IPAddress.Loopback, firstPort);
+        using var secondServer = new TcpListener(IPAddress.Loopback, secondPort);
+        firstServer.Start();
+        secondServer.Start();
+
+        var firstTask = Task.Run(async () =>
+        {
+            using var client = await firstServer.AcceptTcpClientAsync();
+            using var stream = client.GetStream();
+            await ReplyToCommandsAsync(stream, [ (":GU#", "pH#") ]);
+        });
+        var secondTask = Task.Run(async () =>
+        {
+            using var client = await secondServer.AcceptTcpClientAsync();
+            using var stream = client.GetStream();
+            await ReplyToCommandsAsync(stream, [ (":GU#", "N#") ]);
+        });
+
+        var options = new TestOptionsMonitor<OnStepOptions>(new OnStepOptions
+        {
+            Enabled = true,
+            Host = "127.0.0.1",
+            Port = firstPort,
+        });
+        var onstep = new OnStepClient(options, NullLogger<OnStepClient>.Instance);
+
+        var first = await onstep.GetStatusAsync(CancellationToken.None);
+        options.Set(new OnStepOptions
+        {
+            Enabled = true,
+            Host = "127.0.0.1",
+            Port = secondPort,
+        });
+        var second = await onstep.GetStatusAsync(CancellationToken.None);
+        await Task.WhenAll(firstTask, secondTask);
+
+        Assert.True(first.IsSlewing);
+        Assert.False(second.IsSlewing);
+    }
+
+    [Fact]
     public async Task StartAlignmentAndGoto_RequireSuccessfulAcknowledgements()
     {
         var port = FindAvailablePort();
@@ -269,17 +343,18 @@ public class OnStepClientTests
 
         var serverTask = Task.Run(async () =>
         {
-            using (var startClient = await server.AcceptTcpClientAsync())
-            using (var stream = startClient.GetStream())
-                await ReplyToCommandsAsync(stream, [ (":A3#", "1") ], received);
+            using (var alignmentClient = await server.AcceptTcpClientAsync())
+            using (var alignmentStream = alignmentClient.GetStream())
+                await ReplyToCommandsAsync(alignmentStream, [ (":A3#", "1") ], received);
 
-            using (var gotoClient = await server.AcceptTcpClientAsync())
-            using (var stream = gotoClient.GetStream())
-                await ReplyToCommandsAsync(stream, [
-                    (":Sa+45*00'00#", "1"),
-                    (":Sz060*00'00#", "1"),
-                    (":MS#", "0"),
-                ], received);
+            using var gotoClient = await server.AcceptTcpClientAsync();
+            using var gotoStream = gotoClient.GetStream();
+            await ReplyToCommandsAsync(gotoStream,
+            [
+                (":Sa+45*00'00#", "1"),
+                (":Sz060*00'00#", "1"),
+                (":MA#", "0"),
+            ], received);
         });
 
         var onstep = CreateEnabledClient(port);
@@ -289,10 +364,112 @@ public class OnStepClientTests
 
         Assert.True(started.Succeeded);
         Assert.True(gotoResult.Succeeded);
-        Assert.Equal(":MS#", gotoResult.Command);
+        Assert.Equal(":MA#", gotoResult.Command);
         Assert.Contains(":A3#", received.ToString());
         Assert.Contains(":Sa+45*00'00#", received.ToString());
         Assert.Contains(":Sz060*00'00#", received.ToString());
+    }
+
+    [Fact]
+    public async Task SetOverheadLimitAsync_SendsReplyCheckedCommand()
+    {
+        var port = FindAvailablePort();
+        using var server = new TcpListener(IPAddress.Loopback, port);
+        server.Start();
+        var serverTask = Task.Run(async () =>
+        {
+            using var client = await server.AcceptTcpClientAsync();
+            using var stream = client.GetStream();
+            await ReplyToCommandsAsync(stream, [ (":So90#", "1") ]);
+        });
+
+        var result = await CreateEnabledClient(port).SetOverheadLimitAsync(90, CancellationToken.None);
+        await serverTask;
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(":So90#", result.Command);
+    }
+
+    [Fact]
+    public async Task AcceptAlignmentPointAsync_UsesDocumentedAlignmentAcceptanceCommand()
+    {
+        var port = FindAvailablePort();
+        using var server = new TcpListener(IPAddress.Loopback, port);
+        server.Start();
+        var received = new StringBuilder();
+        var serverTask = Task.Run(async () =>
+        {
+            using var client = await server.AcceptTcpClientAsync();
+            using var stream = client.GetStream();
+            await ReplyToCommandsAsync(stream,
+            [
+                (":Sr19:47:46#", "1"),
+                (":Sd+42*41:20#", "1"),
+                (":A+#", "1"),
+            ], received);
+        });
+
+        var result = new SolveResult(296.944646, 42.688983, null, null, 0.95, TimeSpan.Zero, "test");
+        var accepted = await CreateEnabledClient(port).AcceptAlignmentPointAsync(result, CancellationToken.None);
+        await serverTask;
+
+        Assert.True(accepted.Succeeded);
+        Assert.Equal(":A+#", accepted.Command);
+        Assert.Equal("1", accepted.Response);
+        Assert.Contains(":A+#", received.ToString());
+    }
+
+    [Fact]
+    public async Task AcceptAlignmentPointAsync_UsesFreshConnectionAfterAnIdleStatusQuery()
+    {
+        var port = FindAvailablePort();
+        using var server = new TcpListener(IPAddress.Loopback, port);
+        server.Start();
+        var serverTask = Task.Run(async () =>
+        {
+            using (var idleClient = await server.AcceptTcpClientAsync())
+            using (var idleStream = idleClient.GetStream())
+                await ReplyToCommandsAsync(idleStream, [ (":GU#", "N#") ]);
+
+            using var acceptClient = await server.AcceptTcpClientAsync();
+            using var acceptStream = acceptClient.GetStream();
+            await ReplyToCommandsAsync(acceptStream,
+            [
+                (":Sr19:47:46#", "1"),
+                (":Sd+42*41:20#", "1"),
+                (":A+#", "1"),
+            ]);
+        });
+
+        var onstep = CreateEnabledClient(port);
+        await onstep.GetStatusAsync(CancellationToken.None);
+        var result = new SolveResult(296.944646, 42.688983, null, null, 0.95, TimeSpan.Zero, "test");
+        var accepted = await onstep.AcceptAlignmentPointAsync(result, CancellationToken.None);
+        await serverTask;
+
+        Assert.True(accepted.Succeeded);
+    }
+
+    [Fact]
+    public async Task ReturnHomeAsync_SendsNoReplyCommandWithoutWaitingForAReply()
+    {
+        var port = FindAvailablePort();
+        using var server = new TcpListener(IPAddress.Loopback, port);
+        server.Start();
+        var serverTask = Task.Run(async () =>
+        {
+            using var client = await server.AcceptTcpClientAsync();
+            using var stream = client.GetStream();
+            Assert.Equal(":hC#", await ReadFrameAsync(stream));
+            // OnStep :hC# deliberately sends no response.
+        });
+
+        var result = await CreateEnabledClient(port).ReturnHomeAsync(CancellationToken.None);
+        await serverTask;
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(":hC#", result.Command);
+        Assert.Equal(string.Empty, result.Response);
     }
 
     [Fact]
@@ -308,7 +485,7 @@ public class OnStepClientTests
             await ReplyToCommandsAsync(stream, [
                 (":Sa+45*00'00#", "1"),
                 (":Sz060*00'00#", "1"),
-                (":MS#", "4"),
+                (":MA#", "4"),
             ]);
         });
 
@@ -316,7 +493,7 @@ public class OnStepClientTests
         await serverTask;
 
         Assert.False(result.Succeeded);
-        Assert.Equal(":MS#", result.Command);
+        Assert.Equal(":MA#", result.Command);
         Assert.Contains("parked", result.Error, StringComparison.OrdinalIgnoreCase);
     }
 

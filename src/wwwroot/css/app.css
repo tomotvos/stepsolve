@@ -421,7 +421,13 @@ details summary {
     min-height: 36px;
 }
 
-.btn-secondary:hover {
+.btn-secondary:disabled,
+.btn-danger:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.btn-secondary:hover:not(:disabled) {
     opacity: 0.85;
 }
 
@@ -437,7 +443,7 @@ details summary {
     min-height: 36px;
 }
 
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled) {
     opacity: 0.85;
 }
 

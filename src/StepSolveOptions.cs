@@ -67,6 +67,8 @@ public sealed class OnStepOptions
     public bool Enabled { get; set; }
     public string Host { get; set; } = "localhost";
     public int Port { get; set; } = 9998;
+    /// <summary>Maximum time for one TCP connect-and-command exchange with OnStep.</summary>
+    public int CommandTimeoutSeconds { get; set; } = 10;
     public string SyncMode { get; set; } = "sync";
     public double MaxSyncDeltaDeg { get; set; } = 5.0;
 
@@ -75,9 +77,9 @@ public sealed class OnStepOptions
     public string StartupPolicy { get; set; } = "probe";
     public string BackgroundPolicy { get; set; } = "validate";
     public double MinSolveConfidence { get; set; } = 0.90;
-    public int StableSolveIntervalSeconds { get; set; } = 5;
+    public int StableSolveIntervalSeconds { get; set; } = 1;
     public double MaxSolveDisagreementDeg { get; set; } = 0.05;
-    public int CalibrationSettleSeconds { get; set; } = 5;
+    public int CalibrationSettleSeconds { get; set; } = 3;
     public int CalibrationTargetRetryCount { get; set; } = 3;
 
     // V1 reference-rig guard rails. These are intentionally narrower than
@@ -88,12 +90,10 @@ public sealed class OnStepOptions
     public double CalibrationMaxAzimuthDeg { get; set; } = 150;
 
     // Ordered as Az/Alt, relative to the established 0,0 home reference.
-    public List<OnStepCalibrationTarget> CalibrationTargets { get; set; } =
-    [
-        new(0, 45),
-        new(60, 60),
-        new(90, 80),
-    ];
+    // Defaults live in appsettings.json. This must start empty because
+    // ConfigurationBinder appends configured collection values to an existing
+    // list; initializing it here would duplicate every configured target.
+    public List<OnStepCalibrationTarget> CalibrationTargets { get; set; } = [];
 }
 
 public sealed record OnStepCalibrationTarget(double AzimuthDeg, double AltitudeDeg);

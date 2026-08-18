@@ -58,6 +58,7 @@ public class StepSolveServiceTests
         public OnStepCalibrationStatus Status { get; private set; } = new(
             "AwaitingStableSolves", true, true, true, "simulation", 1, 1, 0, 45, null, null, null);
         public bool NeedsFreshSolve => true;
+        public bool WantsImmediateFollowUpSolve => true;
         public bool UsesSimulatedSolves => true;
 
         public Task InitializeAsync(CancellationToken ct) => Task.CompletedTask;
@@ -65,6 +66,7 @@ public class StepSolveServiceTests
         public Task<CalibrationActionResult> StartAsync(bool confirmed, string currentMode, CancellationToken ct) => Task.FromResult(new CalibrationActionResult(true, null));
         public Task<CalibrationActionResult> AcceptAsync(string currentMode, CancellationToken ct) => Task.FromResult(new CalibrationActionResult(true, null));
         public Task<CalibrationActionResult> AbortAsync(string currentMode, CancellationToken ct) => Task.FromResult(new CalibrationActionResult(true, null));
+        public Task<CalibrationActionResult> ReconnectAsync(string currentMode, CancellationToken ct) => Task.FromResult(new CalibrationActionResult(true, null));
         public Task<CalibrationActionResult> SetSimulationAsync(bool enabled, string currentMode, CancellationToken ct) => Task.FromResult(new CalibrationActionResult(true, null));
 
         public Task<SolveResult> CreateSimulatedSolveAsync(CancellationToken ct)

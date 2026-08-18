@@ -20,11 +20,20 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
     private int _pointIndex;
     private int _attempt;
     private DateTimeOffset _settlingSince;
+    private DateTimeOffset _nextMotionPollAt = DateTimeOffset.MinValue;
     private SolveResult? _firstStableSolve;
-    private DateTimeOffset _firstStableSolveAt;
+    private DateTimeOffset _nextSolveAttemptAt = DateTimeOffset.MinValue;
     private SolveResult? _candidate;
     private bool _simulationEnabled;
     private int _simulationSample;
+    private bool _probePending = true;
+    private DateTimeOffset _nextProbeAttemptAt = DateTimeOffset.MinValue;
+    private bool? _lastConfiguredEnabled;
+    private string? _lastConfiguredHost;
+    private int _lastConfiguredPort;
+    private string? _lastConfiguredStartupPolicy;
+    private static readonly TimeSpan ProbeRetryDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan HealthyProbeInterval = TimeSpan.FromSeconds(15);
 
     public OnStepCalibrationController(
         OnStepClient onstep,
@@ -38,7 +47,11 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
 
     public OnStepCalibrationStatus Status => Volatile.Read(ref _status);
 
-    public bool NeedsFreshSolve => Status.State == "AwaitingStableSolves";
+    // After a disagreement, this temporarily becomes false to prevent the
+    // capture loop from spending solver time until the retry backoff expires.
+    public bool NeedsFreshSolve => Status.State == "AwaitingStableSolves" &&
+        DateTimeOffset.UtcNow >= _nextSolveAttemptAt;
+    public bool WantsImmediateFollowUpSolve => _firstStableSolve != null && NeedsFreshSolve;
     public bool UsesSimulatedSolves => _simulationEnabled && NeedsFreshSolve;
 
     public async Task<CalibrationActionResult> SetSimulationAsync(bool enabled, string currentMode, CancellationToken ct)
@@ -92,27 +105,68 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
         if (IsActive(Status.State))
             return;
 
-        var options = _options.CurrentValue;
-        if (!options.Enabled)
-        {
-            SetStatus("Idle", false, false, "OnStep is disabled in Settings.");
-            return;
-        }
-
-        if (!string.Equals(options.StartupPolicy, "probe", StringComparison.OrdinalIgnoreCase))
-        {
-            SetStatus("Idle", false, false,
-                $"Startup policy '{options.StartupPolicy}' is not enabled; select probe for read-only connection validation.");
-            return;
-        }
-
         await _gate.WaitAsync(ct);
         try
         {
+            if (IsActive(Status.State))
+                return;
+
+            var options = _options.CurrentValue;
+            var configurationChanged = options.Enabled != _lastConfiguredEnabled ||
+                !string.Equals(options.Host, _lastConfiguredHost, StringComparison.OrdinalIgnoreCase) ||
+                options.Port != _lastConfiguredPort ||
+                !string.Equals(options.StartupPolicy, _lastConfiguredStartupPolicy, StringComparison.OrdinalIgnoreCase);
+            _lastConfiguredEnabled = options.Enabled;
+            _lastConfiguredHost = options.Host;
+            _lastConfiguredPort = options.Port;
+            _lastConfiguredStartupPolicy = options.StartupPolicy;
+
+            if (!options.Enabled)
+            {
+                _probePending = false;
+                if (configurationChanged || Status.IsConnected)
+                    SetStatus("Idle", false, false, "OnStep is disabled in Settings.");
+                return;
+            }
+
+            if (!string.Equals(options.StartupPolicy, "probe", StringComparison.OrdinalIgnoreCase))
+            {
+                _probePending = false;
+                if (configurationChanged || Status.IsConnected)
+                    SetStatus("Idle", false, false,
+                        $"Startup policy '{options.StartupPolicy}' is not enabled; select probe for read-only connection validation.");
+                return;
+            }
+
+            if (configurationChanged)
+            {
+                _probePending = true;
+                _nextProbeAttemptAt = DateTimeOffset.MinValue;
+            }
+
+            // A failed action that lost its transport must recover without a
+            // service restart. Conversely, a successful idle probe is checked
+            // periodically so the UI cannot retain a stale "Connected / safe"
+            // state after the controller is powered down.
+            if (Status.State == "Failed" && !Status.IsConnected)
+                _probePending = true;
+
+            var now = DateTimeOffset.UtcNow;
+            var healthyCheckDue = Status.State == "Idle" && Status.IsConnected && now >= _nextProbeAttemptAt;
+            if ((!_probePending && !healthyCheckDue) || now < _nextProbeAttemptAt)
+                return;
+
             try
             {
+                var recovering = _probePending || !Status.IsConnected;
+                if (recovering)
+                    _logger.LogInformation("OnStep probe starting ({Host}:{Port})", options.Host, options.Port);
                 var identity = await _onstep.ProbeAsync(ct);
                 var mount = await _onstep.GetStatusAsync(ct);
+                _probePending = false;
+                _nextProbeAttemptAt = now.Add(HealthyProbeInterval);
+                if (recovering)
+                    _logger.LogInformation("OnStep probe succeeded: {Product} {FirmwareVersion}", identity.Product, identity.FirmwareVersion);
                 SetStatus("Idle", true, IsSafe(mount),
                     IsSafe(mount)
                         ? $"Connected to {identity.Product} {identity.FirmwareVersion}; mount is safe for alignment."
@@ -125,7 +179,8 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "OnStep startup probe failed");
+                _nextProbeAttemptAt = DateTimeOffset.UtcNow.Add(ProbeRetryDelay);
+                _logger.LogWarning(ex, "OnStep probe failed; retrying in {RetryDelaySeconds}s", ProbeRetryDelay.TotalSeconds);
                 SetStatus("Idle", false, false, $"OnStep probe failed: {ex.Message}");
             }
         }
@@ -173,11 +228,14 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
                     return new(false, "Mount is not in a safe state for alignment.");
                 }
 
-                var started = await _onstep.StartAlignmentAsync(3, ct);
-                if (!started.Succeeded)
+                // The guided V1 target plan includes Alt 80°. Deliberately set
+                // the firmware overhead limit once, before starting alignment,
+                // so it cannot reject that safe planned target.
+                var overhead = await _onstep.SetOverheadLimitAsync(90, ct);
+                if (!overhead.Succeeded)
                 {
-                    SetStatus("Failed", true, true, started.Error, started.Response);
-                    return new(false, started.Error ?? "OnStep rejected the three-point alignment command.");
+                    SetStatus("Failed", true, true, overhead.Error, overhead.Response);
+                    return new(false, overhead.Error ?? "OnStep rejected the overhead-limit update.");
                 }
 
                 _targets = options.CalibrationTargets.ToList();
@@ -185,11 +243,19 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
                 _attempt = 1;
                 _firstStableSolve = null;
                 _candidate = null;
+                _nextSolveAttemptAt = DateTimeOffset.MinValue;
                 _simulationSample = 0;
-                SetStatus("StartingAlignment", true, true,
-                    $"Connected to {identity.Product} {identity.FirmwareVersion}; starting point 1.", started.Response);
+                var homing = await _onstep.ReturnHomeAsync(ct);
+                if (!homing.Succeeded)
+                {
+                    SetStatus("Failed", true, true, homing.Error, homing.Response);
+                    return new(false, homing.Error ?? "OnStep rejected the Home command.");
+                }
 
-                return await CommandCurrentTargetAsync(ct);
+                SetStatus("ReturningHome", true, true,
+                    $"Connected to {identity.Product} {identity.FirmwareVersion}; returning mount to Home before point 1.");
+                _logger.LogInformation("OnStep alignment start: commanded physical return to Home; waiting for H status");
+                return new(true, null);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -198,6 +264,7 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "OnStep alignment preflight failed");
+                RequestConnectionRecovery();
                 SetStatus("Failed", false, false, $"OnStep preflight failed: {ex.Message}");
                 return new(false, $"OnStep preflight failed: {ex.Message}");
             }
@@ -210,12 +277,62 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
 
     public async Task TickAsync(CancellationToken ct)
     {
-        if (Status.State is not ("WaitingForGoto" or "Settling"))
+        if (Status.State is not ("ReturningHome" or "WaitingForGoto" or "Settling"))
             return;
 
         await _gate.WaitAsync(ct);
         try
         {
+            if ((Status.State is "ReturningHome" or "WaitingForGoto") &&
+                DateTimeOffset.UtcNow < _nextMotionPollAt)
+                return;
+
+            if (Status.State == "ReturningHome")
+            {
+                try
+                {
+                    var mount = await _onstep.GetStatusAsync(ct);
+                    if (mount.IsParked || mount.IsParking)
+                    {
+                        SetStatus("Failed", true, false,
+                            "Mount entered a parked state while returning Home.", mount.Raw);
+                        return;
+                    }
+
+                    // :hC# has no reply.  Do not infer completion from N / not
+                    // slewing: OnStep documents H as the authoritative Home flag.
+                    if (!mount.IsAtHome)
+                    {
+                        ScheduleNextMotionPoll();
+                        SetStatus("ReturningHome", true, true,
+                            "Returning mount to Home; waiting for OnStep Home (H) status.", mount.Raw);
+                        return;
+                    }
+
+                    var started = await _onstep.StartAlignmentAsync(3, ct);
+                    if (!started.Succeeded)
+                    {
+                        SetStatus("Failed", true, true, started.Error, started.Response);
+                        return;
+                    }
+
+                    SetStatus("StartingAlignment", true, true,
+                        "Mount is at Home; starting point 1.", started.Response);
+                    await CommandCurrentTargetAsync(ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Unable to poll OnStep Home state");
+                    RequestConnectionRecovery();
+                    SetStatus("Failed", false, false, $"Unable to confirm Home: {ex.Message}");
+                }
+                return;
+            }
+
             if (Status.State == "WaitingForGoto")
             {
                 try
@@ -230,10 +347,12 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
 
                     if (mount.IsSlewing)
                     {
+                        ScheduleNextMotionPoll();
                         SetStatus("WaitingForGoto", true, true, "Waiting for OnStep GoTo to finish.", mount.Raw);
                         return;
                     }
 
+                    _nextMotionPollAt = DateTimeOffset.MinValue;
                     _settlingSince = DateTimeOffset.UtcNow;
                     SetStatus("Settling", true, true, "GoTo complete; waiting for the mount to settle.", mount.Raw);
                 }
@@ -244,6 +363,7 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Unable to poll OnStep GoTo state");
+                    RequestConnectionRecovery();
                     SetStatus("Failed", false, false, $"Unable to poll OnStep: {ex.Message}");
                 }
                 return;
@@ -255,8 +375,9 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
 
             _firstStableSolve = null;
             _candidate = null;
+            _nextSolveAttemptAt = DateTimeOffset.MinValue;
             SetStatus("AwaitingStableSolves", true, true,
-                "Mount settled. Collecting two fresh, agreeing plate solves.");
+                "Mount settled. Collecting two plate solves to verify pointing.");
         }
         finally
         {
@@ -287,14 +408,10 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
             if (_firstStableSolve == null)
             {
                 _firstStableSolve = result;
-                _firstStableSolveAt = now;
                 SetStatus("AwaitingStableSolves", true, true,
-                    "First fresh solve received; waiting for a second agreeing solve.");
+                    "First solve received; waiting for a second solve to confirm it.");
                 return;
             }
-
-            if (now - _firstStableSolveAt < TimeSpan.FromSeconds(options.StableSolveIntervalSeconds))
-                return;
 
             var firstSolve = _firstStableSolve.Value;
             var disagreement = OnStepClient.AngularDistance(
@@ -302,15 +419,15 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
             if (disagreement > options.MaxSolveDisagreementDeg)
             {
                 _firstStableSolve = result;
-                _firstStableSolveAt = now;
+                _nextSolveAttemptAt = now.AddSeconds(options.StableSolveIntervalSeconds);
                 SetStatus("AwaitingStableSolves", true, true,
-                    $"Solve disagreement was {disagreement:F3}°; using the latest solve as a new first sample.");
+                    $"Solves differed by {disagreement:F3}°; retrying comparison after {options.StableSolveIntervalSeconds}s.");
                 return;
             }
 
             _candidate = result;
             SetStatus("AwaitingAcceptance", true, true,
-                $"Stable solve candidate ready (agreement {disagreement:F3}°). Approve it to add point {_pointIndex + 1}.",
+                $"Pointing verified (solves differ by {disagreement:F3}°). Approve to add point {_pointIndex + 1}.",
                 candidate: result);
         }
         finally
@@ -334,13 +451,20 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
             SetStatus("AcceptingPoint", true, true, $"Submitting approved point {_pointIndex + 1} to OnStep.", candidate: candidate);
             try
             {
-                var accepted = await _onstep.SyncSolvedPositionAsync(candidate, ct);
+                var accepted = await _onstep.AcceptAlignmentPointAsync(candidate, ct);
                 if (!accepted.Succeeded)
                 {
                     SetStatus("Failed", true, true, accepted.Error, accepted.Response, candidate);
                     return new(false, accepted.Error ?? "OnStep rejected the solved calibration point.");
                 }
 
+                // This is deliberately logged before the read-only :A?#
+                // verification. If that follow-up query loses its transport,
+                // operators can still distinguish an accepted point from one
+                // that never reached OnStep.
+                _logger.LogInformation(
+                    "OnStep accepted calibration point {Point}: RA={Ra:F4} Dec={Dec:F4}; verifying alignment progress",
+                    _pointIndex + 1, candidate.RaDeg, candidate.DecDeg);
                 var progress = await _onstep.GetAlignmentProgressAsync(ct);
                 if (_pointIndex + 1 < _targets.Count && !progress.IsActive)
                 {
@@ -354,12 +478,19 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
                 _pointIndex++;
                 _attempt = 1;
                 _firstStableSolve = null;
+                _nextSolveAttemptAt = DateTimeOffset.MinValue;
                 _candidate = null;
 
                 if (_pointIndex == _targets.Count)
                 {
-                    SetStatus("Completed", true, true,
-                        "All three plate-solved points were accepted by OnStep.", accepted.Response);
+                    // The alignment is over and no background OnStep operation is
+                    // active yet. Release the session socket so the dashboard does
+                    // not imply that a controller that is later powered down is
+                    // still connected.
+                    await _onstep.CloseConnectionAsync(CancellationToken.None);
+                    SetStatus("Completed", false, false,
+                        "All three plate-solved points were accepted by OnStep; connection closed after session completion.",
+                        accepted.Response);
                     return new(true, null);
                 }
 
@@ -374,6 +505,7 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "OnStep failed while accepting calibration point");
+                RequestConnectionRecovery();
                 SetStatus("Failed", false, false, $"OnStep sync failed: {ex.Message}");
                 return new(false, $"OnStep sync failed: {ex.Message}");
             }
@@ -400,6 +532,31 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
             SetStatus("Aborted", Status.IsConnected, Status.IsSafe,
                 "Alignment aborted locally. OnStep may retain an incomplete alignment session.");
             _logger.LogWarning("OnStep calibration session aborted by operator");
+            return new(true, null);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<CalibrationActionResult> ReconnectAsync(string currentMode, CancellationToken ct)
+    {
+        if (!IsCalibrateMode(currentMode))
+            return new(false, "OnStep reconnect can only be requested in Calibrate mode.");
+
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (IsActive(Status.State))
+                return new(false, "Cannot reconnect while an alignment session is active.");
+            if (!_options.CurrentValue.Enabled)
+                return new(false, "OnStep is disabled in Settings.");
+
+            await _onstep.CloseConnectionAsync(ct);
+            RequestConnectionRecovery();
+            SetStatus("Idle", false, false, "Reconnect requested; probing OnStep now.");
+            _logger.LogInformation("OnStep reconnect requested by operator");
             return new(true, null);
         }
         finally
@@ -440,6 +597,7 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
 
         SetStatus("WaitingForGoto", true, true,
             $"GoTo accepted for point {_pointIndex + 1}, attempt {_attempt}.", goTo.Response);
+        _nextMotionPollAt = DateTimeOffset.MinValue;
         return new(true, null);
     }
 
@@ -496,6 +654,15 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
 
     private static bool IsSafeOrSlewing(OnStepMountStatus mount) =>
         !mount.IsParked && !mount.IsParking && !mount.IsHoming;
+
+    private void RequestConnectionRecovery()
+    {
+        _probePending = true;
+        _nextProbeAttemptAt = DateTimeOffset.MinValue;
+    }
+
+    private void ScheduleNextMotionPoll() =>
+        _nextMotionPollAt = DateTimeOffset.UtcNow.AddSeconds(1);
 
     private static OnStepCalibrationTarget TargetForAttempt(OnStepCalibrationTarget baseTarget, int attempt) => attempt switch
     {

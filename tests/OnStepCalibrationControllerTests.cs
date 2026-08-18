@@ -54,6 +54,38 @@ public sealed class OnStepCalibrationControllerTests
     }
 
     [Fact]
+    public async Task InitializeAsync_ProbesWhenOnStepIsEnabledAfterStartup()
+    {
+        await using var mount = new MockOnStep();
+        var options = new TestOptionsMonitor<OnStepOptions>(new OnStepOptions
+        {
+            Enabled = false,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+            StartupPolicy = "probe",
+        });
+        var controller = new OnStepCalibrationController(
+            new OnStepClient(options, NullLogger<OnStepClient>.Instance),
+            options,
+            NullLogger<OnStepCalibrationController>.Instance);
+
+        await controller.InitializeAsync(CancellationToken.None);
+        Assert.False(controller.Status.IsConnected);
+
+        options.Set(new OnStepOptions
+        {
+            Enabled = true,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+            StartupPolicy = "probe",
+        });
+        await controller.InitializeAsync(CancellationToken.None);
+
+        Assert.True(controller.Status.IsConnected);
+        Assert.True(controller.Status.IsSafe);
+    }
+
+    [Fact]
     public async Task Simulation_IsTemporaryAndCreatesStableSolvesFromOnStepPosition()
     {
         await using var mount = new MockOnStep();
@@ -69,8 +101,7 @@ public sealed class OnStepCalibrationControllerTests
         Assert.True((await controller.SetSimulationAsync(true, "calibrate", CancellationToken.None)).Success);
         Assert.True(controller.Status.SimulationEnabled);
         Assert.True((await controller.StartAsync(true, "calibrate", CancellationToken.None)).Success);
-        await controller.TickAsync(CancellationToken.None);
-        await controller.TickAsync(CancellationToken.None);
+        await AdvanceToSolveGateAsync(controller);
 
         var first = await controller.CreateSimulatedSolveAsync(CancellationToken.None);
         var second = await controller.CreateSimulatedSolveAsync(CancellationToken.None);
@@ -103,11 +134,13 @@ public sealed class OnStepCalibrationControllerTests
         var started = await controller.StartAsync(true, "calibrate", CancellationToken.None);
 
         Assert.True(started.Success);
-        Assert.Equal("WaitingForGoto", controller.Status.State);
+        Assert.Equal("ReturningHome", controller.Status.State);
         Assert.Equal(1, controller.Status.CurrentPoint);
         Assert.Equal(0, controller.Status.RequestedAzimuthDeg);
         Assert.Equal(45, controller.Status.RequestedAltitudeDeg);
 
+        await controller.TickAsync(CancellationToken.None); // Home confirmed → point 1 GoTo
+        Assert.Equal("WaitingForGoto", controller.Status.State);
         await controller.TickAsync(CancellationToken.None); // GoTo complete → settling
         await controller.TickAsync(CancellationToken.None); // no configured delay → solve gate
         Assert.True(controller.NeedsFreshSolve);
@@ -132,13 +165,69 @@ public sealed class OnStepCalibrationControllerTests
         var commands = await mount.StopAsync();
         Assert.Equal(new[]
         {
-            ":GVP#", ":GVN#", ":GU#", ":A3#",
-            ":Sa+45*00'00#", ":Sz000*00'00#", ":MS#",
+            ":GVP#", ":GVN#", ":GU#", ":So90#", ":hC#", ":GU#", ":A3#",
+            ":Sa+45*00'00#", ":Sz000*00'00#", ":MA#",
             ":GU#",
-            ":Sr06:40:00#", ":Sd+45*00:00#", ":CM#",
+            ":Sr06:40:00#", ":Sd+45*00:00#", ":A+#",
             ":A?#",
-            ":Sa+60*00'00#", ":Sz060*00'00#", ":MS#",
+            ":Sa+60*00'00#", ":Sz060*00'00#", ":MA#",
         }, commands);
+    }
+
+    [Fact]
+    public async Task StableSolveInterval_DoesNotDelayTheImmediateConfirmationSolve()
+    {
+        await using var mount = new MockOnStep();
+        var controller = CreateController(new OnStepOptions
+        {
+            Enabled = true,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+            CalibrationSettleSeconds = 0,
+            StableSolveIntervalSeconds = 60,
+        });
+
+        Assert.True((await controller.StartAsync(true, "calibrate", CancellationToken.None)).Success);
+        await AdvanceToSolveGateAsync(controller);
+
+        var solve = new SolveResult(100, 45, null, null, 0.99, TimeSpan.Zero, "stub");
+        await controller.SubmitFreshSolveAsync(solve, CancellationToken.None);
+        Assert.True(controller.WantsImmediateFollowUpSolve);
+
+        await controller.SubmitFreshSolveAsync(solve, CancellationToken.None);
+
+        Assert.Equal("AwaitingAcceptance", controller.Status.State);
+    }
+
+    [Fact]
+    public async Task CompletedAlignment_ClosesTheSessionConnectionAndMarksStatusDisconnected()
+    {
+        await using var mount = new MockOnStep();
+        var controller = CreateController(new OnStepOptions
+        {
+            Enabled = true,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+            StableSolveIntervalSeconds = 0,
+            CalibrationSettleSeconds = 0,
+        });
+        var solve = new SolveResult(100, 45, null, null, 0.99, TimeSpan.Zero, "stub");
+
+        Assert.True((await controller.StartAsync(true, "calibrate", CancellationToken.None)).Success);
+        await controller.TickAsync(CancellationToken.None); // Home confirmed → point 1 GoTo
+        for (var point = 0; point < 3; point++)
+        {
+            await controller.TickAsync(CancellationToken.None);
+            await controller.TickAsync(CancellationToken.None);
+            await controller.SubmitFreshSolveAsync(solve, CancellationToken.None);
+            await controller.SubmitFreshSolveAsync(solve, CancellationToken.None);
+            Assert.True((await controller.AcceptAsync("calibrate", CancellationToken.None)).Success);
+        }
+
+        Assert.Equal("Completed", controller.Status.State);
+        Assert.False(controller.Status.IsConnected);
+        Assert.False(controller.Status.IsSafe);
+        Assert.Contains("connection closed", controller.Status.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -154,8 +243,7 @@ public sealed class OnStepCalibrationControllerTests
         });
 
         Assert.True((await controller.StartAsync(true, "calibrate", CancellationToken.None)).Success);
-        await controller.TickAsync(CancellationToken.None);
-        await controller.TickAsync(CancellationToken.None);
+        await AdvanceToSolveGateAsync(controller);
         await controller.SubmitFreshSolveAsync(new SolveResult(0, 0, null, null, 0, TimeSpan.Zero, "stub"), CancellationToken.None);
 
         Assert.Equal("WaitingForGoto", controller.Status.State);
@@ -166,10 +254,33 @@ public sealed class OnStepCalibrationControllerTests
         Assert.Contains(":Sz010*00'00#", commands);
     }
 
-    private static OnStepCalibrationController CreateController(OnStepOptions options) => new(
-        new OnStepClient(new TestOptionsMonitor<OnStepOptions>(options), NullLogger<OnStepClient>.Instance),
-        new TestOptionsMonitor<OnStepOptions>(options),
-        NullLogger<OnStepCalibrationController>.Instance);
+    private static OnStepCalibrationController CreateController(OnStepOptions options)
+    {
+        // Production target defaults are supplied by appsettings.json. Unit
+        // tests construct the POCO directly, so supply the equivalent plan.
+        if (options.CalibrationTargets.Count == 0)
+        {
+            options.CalibrationTargets =
+            [
+                new(0, 45),
+                new(60, 60),
+                new(90, 80),
+            ];
+        }
+
+        return new OnStepCalibrationController(
+            new OnStepClient(new TestOptionsMonitor<OnStepOptions>(options), NullLogger<OnStepClient>.Instance),
+            new TestOptionsMonitor<OnStepOptions>(options),
+            NullLogger<OnStepCalibrationController>.Instance);
+    }
+
+    private static async Task AdvanceToSolveGateAsync(OnStepCalibrationController controller)
+    {
+        await controller.TickAsync(CancellationToken.None); // Home confirmed → GoTo
+        await controller.TickAsync(CancellationToken.None); // GoTo complete → settling
+        await controller.TickAsync(CancellationToken.None); // settle → solve gate
+        Assert.True(controller.NeedsFreshSolve);
+    }
 
     private sealed class MockOnStep : IAsyncDisposable
     {
@@ -177,6 +288,7 @@ public sealed class OnStepCalibrationControllerTests
         private readonly CancellationTokenSource _cts = new();
         private readonly List<string> _commands = [];
         private readonly Task _server;
+        private bool _atHome;
 
         public MockOnStep()
         {
@@ -222,7 +334,9 @@ public sealed class OnStepCalibrationControllerTests
                         var text = command.ToString();
                         command.Clear();
                         _commands.Add(text);
-                        await stream.WriteAsync(Encoding.ASCII.GetBytes(ReplyFor(text)), _cts.Token);
+                        var reply = ReplyFor(text);
+                        if (reply.Length > 0)
+                            await stream.WriteAsync(Encoding.ASCII.GetBytes(reply), _cts.Token);
                     }
                 }
             }
@@ -230,22 +344,30 @@ public sealed class OnStepCalibrationControllerTests
             catch (SocketException) when (_cts.IsCancellationRequested) { }
         }
 
-        private static string ReplyFor(string command) => command switch
+        private string ReplyFor(string command) => command switch
         {
             ":GVP#" => "OnStepX#",
             ":GVN#" => "1.0#",
-            ":GU#" => "N#",
+            ":GU#" => _atHome ? "NH#" : "N#",
             ":GR#" => "12:00:00#",
             ":GD#" => "+45*00:00#",
             ":A3#" => "1",
+            ":So90#" => "1",
+            ":hC#" => SetHomeAndReturnNoReply(),
             ":A?#" => "321#",
-            ":MS#" => "0",
-            ":CM#" => "N/A#",
+            ":MA#" => "0",
+            ":A+#" => "1",
             _ when command.StartsWith(":Sa", StringComparison.Ordinal) => "1",
             _ when command.StartsWith(":Sz", StringComparison.Ordinal) => "1",
             _ when command.StartsWith(":Sr", StringComparison.Ordinal) => "1",
             _ when command.StartsWith(":Sd", StringComparison.Ordinal) => "1",
             _ => throw new InvalidOperationException($"Unexpected OnStep command {command}"),
         };
+
+        private string SetHomeAndReturnNoReply()
+        {
+            _atHome = true;
+            return string.Empty;
+        }
     }
 }

@@ -37,11 +37,11 @@ OnStep probe (:GVP#, :GVN#, :GU#)
 Operator confirms home (north/level ±5°) and starts alignment
           │
           ▼
-:A3# → target #1 (:Sa, :Sz, :MS#) → wait/settle → two matching solves
+:So90# → :A3# → target #1 (:Sa, :Sz, :MA#) → wait/settle → two matching solves
           │                                                  │
           │                                            Accept point
           │                                                  ▼
-          └── repeat target #2 and #3 ─────────────→ :Sr, :Sd, :CM#
+          └── repeat target #2 and #3 ─────────────→ :Sr, :Sd, :A+#
                                                              │
                                                              ▼
                                                Verify at fourth location
@@ -140,11 +140,11 @@ strings in the controller.
    future controller:
 
    - `StartAlignmentAsync(3)` sends `:A3#`.
-   - `GotoAltAzAsync(altitude, azimuth)` sends `:Sa`, `:Sz`, `:MS#` in order.
-   - `SyncSolvedPositionAsync(result)` sends `:Sr`, `:Sd`, `:CM#` in order.
+   - `GotoAltAzAsync(altitude, azimuth)` sends `:Sa`, `:Sz`, `:MA#` in order.
+   - `AcceptAlignmentPointAsync(result)` sends `:Sr`, `:Sd`, `:A+#` in order.
 
 5. Validate all set commands before continuing. A failed `:Sr` or `:Sd` must
-   prevent `:CM#`; a failed altitude/azimuth target must prevent `:MS#`.
+   prevent `:A+#`; a failed altitude/azimuth target must prevent `:MA#`.
 
 6. Keep the existing `SyncAsync` temporarily as a compatibility wrapper or
    remove it only when Phase 4 changes its caller.
@@ -152,7 +152,7 @@ strings in the controller.
 ### Tests
 
 - correct command order and command formatting;
-- success and error replies for `:Sr`, `:Sd`, `:Sa`, `:Sz`, `:MS`, `:CM`;
+- success and error replies for `:Sr`, `:Sd`, `:Sa`, `:Sz`, `:MA`, `:CM`;
 - timeout, disconnect, missing `#`, overlong reply, and malformed coordinate;
 - no second command after first-command failure;
 - serialization: two concurrent calls cannot interleave commands;
@@ -187,14 +187,14 @@ Add and validate the following `OnStep` keys:
 StartupPolicy                    probe | wait-for-stable-solve | one-point-sync
 BackgroundPolicy                 off | validate | conservative-sync
 MinSolveConfidence               0.90
-StableSolveIntervalSeconds       5
+StableSolveIntervalSeconds       1
 MaxSolveDisagreementDeg          0.05
 MinCorrectionIntervalMinutes     15
 MinCalibrationSeparationDeg      15
 MaxAutomaticCorrectionDeg        2
 MaxAutomaticSyncsPerHour         4
 MaxAutomaticSyncsPerSession      8
-CalibrationSettleSeconds         5
+CalibrationSettleSeconds         3
 CalibrationTargetRetryCount      3
 CalibrationTargets               ordered Az/Alt target list; default (0,45), (60,60), (90,80)
 ```
@@ -346,7 +346,7 @@ Any state → Aborted | Failed
    - the V1 azimuth travel/cable envelope; and
    - OnStep's current status/limit response where available.
 
-3. Command `:Sa`, `:Sz`, `:MS#`; poll `:GU#` until GoTo completes or an
+3. Command `:Sa`, `:Sz`, `:MA#`; poll `:GU#` until GoTo completes or an
    operation timeout expires. Check status before each poll and abort on any
    unsafe transition.
 4. Wait `CalibrationSettleSeconds`, then ask `StepSolveService` for fresh
@@ -355,7 +355,7 @@ Any state → Aborted | Failed
    of the three points requires an explicit operator approval in the first
    release; the session never advances automatically from one candidate to
    the next.
-6. On accept, submit the solved RA/Dec via `:Sr`, `:Sd`, `:CM#`; query
+6. On accept, submit the solved RA/Dec via `:Sr`, `:Sd`, `:A+#`; query
    alignment progress; record the accepted point.
 7. On no solve, choose the next target alternate. Stop at the retry limit.
 8. After point 3, query completion, show the session summary, and remain in

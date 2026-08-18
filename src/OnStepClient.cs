@@ -7,15 +7,20 @@ using Microsoft.Extensions.Options;
 namespace StepSolve;
 
 /// <summary>
-/// TCP client that syncs solved coordinates to an OnStepX mount controller.
-/// Sends :Sr, :Sd, :CM# after each successful solve.
+/// TCP client that synchronizes solved coordinates with an OnStep mount controller.
+/// The legacy sync operation sends :Sr, :Sd, :CM#; guided alignment acceptance
+/// uses the documented :Sr, :Sd, :A+# sequence.
 /// Includes safety threshold to prevent wild jumps from faulty solves.
 /// </summary>
-public sealed class OnStepClient
+public sealed class OnStepClient : IDisposable
 {
     private readonly IOptionsMonitor<OnStepOptions> _options;
     private readonly ILogger<OnStepClient> _logger;
     private readonly SemaphoreSlim _protocolGate = new(1, 1);
+    private TcpClient? _client;
+    private NetworkStream? _stream;
+    private string? _connectedHost;
+    private int _connectedPort;
 
     private DateTimeOffset _lastSyncTime;
     private string? _lastSyncResult;
@@ -37,6 +42,26 @@ public sealed class OnStepClient
 
     public DateTimeOffset LastSyncTime => _lastSyncTime;
     public string? LastSyncResult => _lastSyncResult;
+
+    /// <summary>
+    /// Releases an idle controller connection. Active calibration keeps its socket
+    /// for low-latency command/status exchanges; terminal session states should
+    /// explicitly close it rather than presenting a stale connection as live.
+    /// </summary>
+    public async Task CloseConnectionAsync(CancellationToken ct = default)
+    {
+        await _protocolGate.WaitAsync(ct);
+        try
+        {
+            if (_client != null)
+                _logger.LogDebug("OnStep TCP closing idle connection to {Host}:{Port}", _connectedHost, _connectedPort);
+            Disconnect();
+        }
+        finally
+        {
+            _protocolGate.Release();
+        }
+    }
 
     /// <summary>
     /// Sync the solved coordinates to OnStep, if enabled and within safety threshold.
@@ -97,14 +122,15 @@ public sealed class OnStepClient
             var product = await SendAndReadHashReplyAsync(stream, ":GVP#", token);
             var firmware = await SendAndReadHashReplyAsync(stream, ":GVN#", token);
             return new OnStepIdentity(product, firmware);
-        }, ct);
+        }, ct, retryOnTransportFailure: true, forceNewConnection: true);
 
     /// <summary>
     /// Reads OnStep's packed mount status (<c>:GU#</c>).
     /// </summary>
     public Task<OnStepMountStatus> GetStatusAsync(CancellationToken ct) =>
         WithConnectionAsync(async (stream, token) =>
-            new OnStepMountStatus(await SendAndReadHashReplyAsync(stream, ":GU#", token)), ct);
+            new OnStepMountStatus(await SendAndReadHashReplyAsync(stream, ":GU#", token)), ct,
+            retryOnTransportFailure: true);
 
     /// <summary>
     /// Reads the current equatorial position from the controller.
@@ -115,7 +141,7 @@ public sealed class OnStepClient
             var ra = await SendAndReadHashReplyAsync(stream, ":GR#", token);
             var dec = await SendAndReadHashReplyAsync(stream, ":GD#", token);
             return new OnStepPosition(ParseRa(ra), ParseDec(dec));
-        }, ct);
+        }, ct, retryOnTransportFailure: true);
 
     /// <summary>
     /// Reads the current manual-alignment sequence progress (<c>:A?#</c>).
@@ -128,7 +154,7 @@ public sealed class OnStepClient
                 throw new InvalidDataException($"Unexpected OnStep alignment status reply '{reply}'.");
 
             return new OnStepAlignmentProgress(reply[0] - '0', reply[1] - '0', reply[2] - '0');
-        }, ct);
+        }, ct, retryOnTransportFailure: true);
 
     /// <summary>
     /// Starts an OnStep manual multi-star alignment sequence.
@@ -145,7 +171,39 @@ public sealed class OnStepClient
             return reply == "1"
                 ? OnStepCommandResult.Success(command, reply)
                 : OnStepCommandResult.Failure(command, reply, "OnStep did not start the alignment sequence.");
-        }, ct);
+        }, ct, forceNewConnection: true);
+    }
+
+    /// <summary>Sets OnStep's maximum permitted target altitude.</summary>
+    public Task<OnStepCommandResult> SetOverheadLimitAsync(int altitudeDeg, CancellationToken ct)
+    {
+        if (altitudeDeg is < 0 or > 90)
+            throw new ArgumentOutOfRangeException(nameof(altitudeDeg), "Overhead limit must be between 0° and 90°.");
+
+        var command = $":So{altitudeDeg:D2}#";
+        return WithConnectionAsync(async (stream, token) =>
+        {
+            var reply = await SendAndReadSingleByteReplyAsync(stream, command, token);
+            return reply == "1"
+                ? OnStepCommandResult.Success(command, reply)
+                : OnStepCommandResult.Failure(command, reply, "OnStep rejected the overhead-limit update.");
+        }, ct, forceNewConnection: true);
+    }
+
+    /// <summary>
+    /// Commands the mount to physically return to its configured Home (0,0)
+    /// position.  OnStep deliberately sends no LX200 reply for <c>:hC#</c>;
+    /// callers must poll <c>:GU#</c> and wait for its <c>H</c> status flag before
+    /// issuing the next mount operation.
+    /// </summary>
+    public Task<OnStepCommandResult> ReturnHomeAsync(CancellationToken ct)
+    {
+        const string command = ":hC#";
+        return WithConnectionAsync(async (stream, token) =>
+        {
+            await SendCommandAsync(stream, command, token);
+            return OnStepCommandResult.Success(command, string.Empty);
+        }, ct, forceNewConnection: true);
     }
 
     /// <summary>
@@ -161,7 +219,10 @@ public sealed class OnStepClient
 
         var altitudeCommand = $":Sa{FormatAltitude(altitudeDeg)}#";
         var azimuthCommand = $":Sz{FormatAzimuth(azimuthDeg)}#";
-        const string gotoCommand = ":MS#";
+        // :MS# slews the stored equatorial (RA/Dec) target. :MA# is the
+        // distinct OnStep command that slews the stored horizontal (Alt/Az)
+        // target set above.
+        const string gotoCommand = ":MA#";
 
         return WithConnectionAsync(async (stream, token) =>
         {
@@ -177,13 +238,10 @@ public sealed class OnStepClient
             return gotoReply == "0"
                 ? OnStepCommandResult.Success(gotoCommand, gotoReply)
                 : OnStepCommandResult.Failure(gotoCommand, gotoReply, GotoError(gotoReply));
-        }, ct);
+        }, ct, forceNewConnection: true);
     }
 
-    /// <summary>
-    /// Sets target RA/Dec and synchronizes it with OnStep. During a manual alignment this
-    /// command records the current alignment point.
-    /// </summary>
+    /// <summary>Sets target RA/Dec and applies OnStep's normal local sync command.</summary>
     public Task<OnStepCommandResult> SyncSolvedPositionAsync(SolveResult result, CancellationToken ct)
     {
         var raCmd = $":Sr{FormatRa(result.RaDeg)}#";
@@ -204,7 +262,34 @@ public sealed class OnStepClient
             return syncReply == "N/A"
                 ? OnStepCommandResult.Success(cmCmd, syncReply)
                 : OnStepCommandResult.Failure(cmCmd, syncReply, "OnStep rejected the coordinate sync.");
-        }, ct);
+        }, ct, forceNewConnection: true);
+    }
+
+    /// <summary>
+    /// Stages a solved RA/Dec target and explicitly accepts it as the next star in an
+    /// active OnStep manual alignment sequence.
+    /// </summary>
+    public Task<OnStepCommandResult> AcceptAlignmentPointAsync(SolveResult result, CancellationToken ct)
+    {
+        var raCmd = $":Sr{FormatRa(result.RaDeg)}#";
+        var decCmd = $":Sd{FormatDec(result.DecDeg)}#";
+        const string acceptCmd = ":A+#";
+
+        return WithConnectionAsync(async (stream, token) =>
+        {
+            var raReply = await SendAndReadSingleByteReplyAsync(stream, raCmd, token);
+            if (raReply != "1")
+                return OnStepCommandResult.Failure(raCmd, raReply, "OnStep rejected the target right ascension.");
+
+            var decReply = await SendAndReadSingleByteReplyAsync(stream, decCmd, token);
+            if (decReply != "1")
+                return OnStepCommandResult.Failure(decCmd, decReply, "OnStep rejected the target declination.");
+
+            var acceptReply = await SendAndReadSingleByteReplyAsync(stream, acceptCmd, token);
+            return acceptReply == "1"
+                ? OnStepCommandResult.Success(acceptCmd, acceptReply)
+                : OnStepCommandResult.Failure(acceptCmd, acceptReply, "OnStep rejected the alignment point.");
+        }, ct, forceNewConnection: true);
     }
 
     // Retained for existing callers/tests. The options argument is intentionally ignored: all
@@ -212,7 +297,11 @@ public sealed class OnStepClient
     internal Task SendSyncCommands(OnStepOptions _, SolveResult result, CancellationToken ct) =>
         SyncSolvedPositionAsync(result, ct);
 
-    private async Task<T> WithConnectionAsync<T>(Func<NetworkStream, CancellationToken, Task<T>> operation, CancellationToken ct)
+    private async Task<T> WithConnectionAsync<T>(
+        Func<NetworkStream, CancellationToken, Task<T>> operation,
+        CancellationToken ct,
+        bool retryOnTransportFailure = false,
+        bool forceNewConnection = false)
     {
         var opts = _options.CurrentValue;
         if (!opts.Enabled)
@@ -221,20 +310,49 @@ public sealed class OnStepClient
         await _protocolGate.WaitAsync(ct);
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(3));
-            var token = timeout.Token;
+            // A remote peer can close an idle TCP connection without TcpClient.Connected
+            // noticing. Retrying is deliberately limited to read-only operations: a failed
+            // command write may already have changed the mount state.
+            for (var attempt = 0; ; attempt++)
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                var timeoutSeconds = Math.Max(1, opts.CommandTimeoutSeconds);
+                timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+                var token = timeout.Token;
 
-            using var client = new TcpClient();
-            try
-            {
-                await client.ConnectAsync(opts.Host, opts.Port, token);
-                using var stream = client.GetStream();
-                return await operation(stream, token);
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                throw new TimeoutException($"OnStep did not respond within 3 seconds ({opts.Host}:{opts.Port}).");
+                try
+                {
+                    if (forceNewConnection)
+                        Disconnect();
+                    var stream = await GetConnectionAsync(opts, token);
+                    return await operation(stream, token);
+                }
+                catch (Exception ex) when (retryOnTransportFailure && attempt == 0 && IsTransportFailure(ex))
+                {
+                    Disconnect();
+                    _logger.LogInformation(ex,
+                        "OnStep read-only exchange lost its connection; reconnecting once ({Host}:{Port})",
+                        opts.Host, opts.Port);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    Disconnect();
+                    _logger.LogWarning("OnStep exchange timed out after {TimeoutSeconds}s ({Host}:{Port})",
+                        timeoutSeconds, opts.Host, opts.Port);
+                    throw new TimeoutException($"OnStep did not respond within {timeoutSeconds} seconds ({opts.Host}:{opts.Port}).");
+                }
+                catch (OperationCanceledException)
+                {
+                    Disconnect();
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    if (IsTransportFailure(ex))
+                        Disconnect();
+                    _logger.LogWarning(ex, "OnStep exchange failed ({Host}:{Port})", opts.Host, opts.Port);
+                    throw;
+                }
             }
         }
         finally
@@ -243,17 +361,71 @@ public sealed class OnStepClient
         }
     }
 
-    private static async Task<string> SendAndReadSingleByteReplyAsync(NetworkStream stream, string command, CancellationToken ct)
+    private async Task<NetworkStream> GetConnectionAsync(OnStepOptions options, CancellationToken ct)
+    {
+        if (_client?.Connected == true && _stream != null &&
+            _connectedPort == options.Port &&
+            string.Equals(_connectedHost, options.Host, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogDebug("OnStep TCP reusing connection to {Host}:{Port}", options.Host, options.Port);
+            return _stream;
+        }
+
+        Disconnect();
+        var client = new TcpClient { NoDelay = true };
+        try
+        {
+            _logger.LogDebug("OnStep TCP connecting to {Host}:{Port}", options.Host, options.Port);
+            await client.ConnectAsync(options.Host, options.Port, ct);
+            var stream = client.GetStream();
+            _client = client;
+            _stream = stream;
+            _connectedHost = options.Host;
+            _connectedPort = options.Port;
+            _logger.LogDebug("OnStep TCP connected to {Host}:{Port}", options.Host, options.Port);
+            return stream;
+        }
+        catch
+        {
+            client.Dispose();
+            throw;
+        }
+    }
+
+    private void Disconnect()
+    {
+        var stream = _stream;
+        var client = _client;
+        _stream = null;
+        _client = null;
+        _connectedHost = null;
+        _connectedPort = 0;
+        stream?.Dispose();
+        client?.Dispose();
+    }
+
+    private static bool IsTransportFailure(Exception ex) =>
+        ex is IOException or SocketException or ObjectDisposedException;
+
+    public void Dispose()
+    {
+        Disconnect();
+        _protocolGate.Dispose();
+    }
+
+    private async Task<string> SendAndReadSingleByteReplyAsync(NetworkStream stream, string command, CancellationToken ct)
     {
         await SendCommandAsync(stream, command, ct);
         var buffer = new byte[1];
         var count = await stream.ReadAsync(buffer, ct);
         if (count == 0)
             throw new IOException($"OnStep closed the connection without replying to {command}.");
-        return Encoding.ASCII.GetString(buffer, 0, count);
+        var reply = Encoding.ASCII.GetString(buffer, 0, count);
+        _logger.LogDebug("OnStep RX {Command} ← {Reply}", command, reply);
+        return reply;
     }
 
-    private static async Task<string> SendAndReadHashReplyAsync(NetworkStream stream, string command, CancellationToken ct)
+    private async Task<string> SendAndReadHashReplyAsync(NetworkStream stream, string command, CancellationToken ct)
     {
         await SendCommandAsync(stream, command, ct);
         var reply = new StringBuilder();
@@ -267,15 +439,20 @@ public sealed class OnStepClient
 
             var character = (char)buffer[0];
             if (character == '#')
-                return reply.ToString();
+            {
+                var value = reply.ToString();
+                _logger.LogDebug("OnStep RX {Command} ← {Reply}#", command, value);
+                return value;
+            }
             if (reply.Length >= 1024)
                 throw new InvalidDataException($"OnStep reply to {command} exceeded 1024 bytes.");
             reply.Append(character);
         }
     }
 
-    private static async Task SendCommandAsync(NetworkStream stream, string command, CancellationToken ct)
+    private async Task SendCommandAsync(NetworkStream stream, string command, CancellationToken ct)
     {
+        _logger.LogDebug("OnStep TX {Command}", command);
         var bytes = Encoding.ASCII.GetBytes(command);
         await stream.WriteAsync(bytes, ct);
     }
