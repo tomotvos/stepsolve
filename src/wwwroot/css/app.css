@@ -1,4 +1,4 @@
-/* StepSolve Dashboard — Day/Night themes, mobile-first responsive layout */
+/* StepSolve Dashboard — blue day with an amber night theme. */
 
 :root {
     --bg: #1a1a2e;
@@ -25,7 +25,34 @@
     --indicator-off: #cc3333;
 }
 
+/* Amber night palette: warm, low-glare, and easier to read than red. */
 :root.night {
+    --bg: #1c1205;
+    --bg-alt: #241805;
+    --text: #ffd88a;
+    --text-dim: #b88739;
+    --accent: #d99418;
+    --accent-dim: #70470b;
+    --header-bg: #2b1a04;
+    --field-bg: #241805;
+    --border: rgba(217, 148, 24, 0.18);
+    --btn-bg: #c98212;
+    --btn-text: #1c1205;
+    --log-debug: #85642e;
+    --log-info: #e6bd6d;
+    --log-warn: #ffd166;
+    --log-error: #e77d45;
+    --badge-idle: #64471d;
+    --badge-capturing: #74510c;
+    --badge-solving: #9a6410;
+    --badge-solved: #506625;
+    --badge-error: #923920;
+    --indicator-on: #8ba63c;
+    --indicator-off: #b94c2a;
+}
+
+/* Original red night palette, retained for later comparison. */
+:root.night-red {
     --bg: #1a0808;
     --bg-alt: #200a0a;
     --text: #cc4444;
