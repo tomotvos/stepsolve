@@ -325,7 +325,7 @@ Key settings that differ from Mac development defaults:
 | Setting | Mac default | Pi value |
 |---------|-------------|----------|
 | `StepSolve:Mode` | `idle` | `solve` (set via dashboard) |
-| `Solver:Backend` | `astrometry` | `tetra3` (recommended) |
+| `Solver:Backend` | `tetra3` | `tetra3` (default) |
 | `Solver:FovEstimateDeg` | `0.0` | Your camera FOV (e.g. `34.3`) |
 | `Solver:Tetra3:IndexPath` | local dev venv | `/var/lib/stepsolve/solvers/.venv/lib/pythonX.Y/site-packages/tetra3/data/default_database` |
 | `Solver:Astrometry:IndexPath` | local | `/var/lib/stepsolve/indexes/astrometry` |

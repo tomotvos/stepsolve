@@ -62,7 +62,7 @@ StepSolve replaces SkySolve Next, a Python/FastAPI application with these issues
 1. **Feature parity with SkySolve** — solve images and publish RA/Dec to SkySafari via LX200/TCP
 2. **Appliance reliability** — start at boot, survive power cuts, run for months unattended
 3. **Single-process architecture** — no file-based IPC, no multi-process coordination
-4. **Multiple solver backends** — Astrometry.net (default), Cedar, Tetra3, with configurable index paths
+4. **Multiple solver backends** — Tetra3 (default), Astrometry.net, Cedar, with configurable index paths
 5. **OnStep sync** — optional mount alignment after each solve
 6. **Diagnostic web dashboard** — phone-friendly, day/night theme, real-time log streaming
 7. **Simple deployment** — `scp` one binary + restart service
@@ -532,7 +532,7 @@ Set `Solver:Backend` in `appsettings.json` to select the active solver:
 ```json
 {
   "Solver": {
-    "Backend": "astrometry"
+    "Backend": "tetra3"
   }
 }
 ```
@@ -632,7 +632,7 @@ After each capture, the image (or a downscaled version) is available at `GET /so
     "Lx200Port": 5002
   },
   "Solver": {
-    "Backend": "astrometry",
+    "Backend": "tetra3",
     "FovEstimateDeg": 34.3,
     "HintTimeout": 10,
     "SolveRadius": 20.0,

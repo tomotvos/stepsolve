@@ -13,7 +13,7 @@ public sealed class SolverOptions
 {
     public const string Section = "Solver";
 
-    public string Backend { get; set; } = "astrometry";
+    public string Backend { get; set; } = "tetra3";
     public int HintTimeout { get; set; } = 10;
     public double SolveRadius { get; set; } = 20.0;
     public double FovEstimateDeg { get; set; } = 34.3;

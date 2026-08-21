@@ -529,7 +529,7 @@
             .then(function (data) {
                 if (!data) return;
                 if (data.solver) {
-                    els.setBackend.value = data.solver.backend || 'astrometry';
+                    els.setBackend.value = data.solver.backend || 'tetra3';
                     els.setFovEstimate.value = data.solver.fovEstimateDeg != null ? data.solver.fovEstimateDeg : 34.3;
                     els.setHintTimeout.value = data.solver.hintTimeout || 10;
                     els.setSolveRadius.value = data.solver.solveRadius || 20;

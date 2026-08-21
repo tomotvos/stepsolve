@@ -83,8 +83,8 @@ Three backends are supported, selected via `Solver:Backend` in configuration:
 
 | Backend | Binary | Notes |
 |---------|--------|-------|
-| `astrometry` | `solve-field` | Default. Most robust; requires index files. |
-| `tetra3` | Python subprocess | Fast; good for Pi. Pure Python, no native deps. |
+| `astrometry` | `solve-field` | Optional; requires index files. |
+| `tetra3` | Python subprocess | Default. Field-tested on Pi; fast and reliable in light-polluted conditions. |
 | `cedar` | Python subprocess | Tetra3 fork with optimised database; back-end wired, not in UI yet. |
 
 Backend switches take effect on the next solve cycle — no restart needed.

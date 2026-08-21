@@ -18,7 +18,7 @@ public class StepSolveOptionsTests
     public void SolverOptions_HasCorrectDefaults()
     {
         var opts = new SolverOptions();
-        Assert.Equal("astrometry", opts.Backend);
+        Assert.Equal("tetra3", opts.Backend);
         Assert.Equal(10, opts.HintTimeout);
         Assert.Equal(20.0, opts.SolveRadius);
         Assert.True(opts.EnableFallback);

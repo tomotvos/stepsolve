@@ -27,7 +27,7 @@ internal sealed class SolverRouter : ISolver
 
     public Task<SolveResult> SolveAsync(string imagePath, SolveHints? hints, CancellationToken ct)
     {
-        var backend = (_config["Solver:Backend"] ?? "astrometry").ToLowerInvariant();
+        var backend = (_config["Solver:Backend"] ?? "tetra3").ToLowerInvariant();
         ISolver solver = backend switch
         {
             "cedar" => _cedar,
@@ -40,7 +40,7 @@ internal sealed class SolverRouter : ISolver
 
     private ISolver LogAndFallback(string backend)
     {
-        _logger.LogWarning("Unknown backend '{Backend}', falling back to astrometry", backend);
-        return _astrometry;
+        _logger.LogWarning("Unknown backend '{Backend}', falling back to tetra3", backend);
+        return _tetra3;
     }
 }
