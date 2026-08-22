@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>StepSolve</title>
-    <link rel="stylesheet" href="/css/app.css?v=automatic-corrections-1">
+    <link rel="stylesheet" href="/css/app.css?v=onstep-settings-2">
 </head>
 <body>
     <header>
@@ -102,23 +102,23 @@
                         <option value="astrometry">Astrometry</option>
                     </select>
                 </div>
-                <div class="setting-field">
+                <div id="set-fov-estimate-field" class="setting-field">
                     <label for="set-fov-estimate">FOV Estimate (°)</label>
                     <input id="set-fov-estimate" type="number" min="0" max="180" step="0.1" />
                 </div>
-                <div class="setting-field">
+                <div id="set-hint-timeout-field" class="setting-field">
                     <label for="set-hint-timeout">Hint Timeout (s)</label>
                     <input id="set-hint-timeout" type="number" min="1" max="120" />
                 </div>
-                <div class="setting-field">
+                <div id="set-solve-radius-field" class="setting-field">
                     <label for="set-solve-radius">Solve Radius (°)</label>
                     <input id="set-solve-radius" type="number" min="0.1" max="180" step="0.1" />
                 </div>
-                <div class="setting-field">
+                <div id="set-tetra3-index-field" class="setting-field">
                     <label for="set-tetra3-index">Tetra3 Index Path</label>
                     <input id="set-tetra3-index" type="text" style="width:300px" placeholder="/path/to/tetra3/database" />
                 </div>
-                <div class="setting-field">
+                <div id="set-astrometry-index-field" class="setting-field">
                     <label for="set-astrometry-index">Astrometry Index Path</label>
                     <input id="set-astrometry-index" type="text" style="width:300px" placeholder="/path/to/index/files" />
                 </div>
@@ -170,10 +170,6 @@
                     <input id="set-onstep-enabled" type="checkbox" />
                 </div>
                 <div class="setting-field">
-                    <label for="set-automatic-corrections">Automatic corrections</label>
-                    <input id="set-automatic-corrections" type="checkbox" />
-                </div>
-                <div class="setting-field">
                     <label for="set-onstep-host">Host</label>
                     <input id="set-onstep-host" type="text" />
                 </div>
@@ -181,13 +177,19 @@
                     <label for="set-onstep-port">Port</label>
                     <input id="set-onstep-port" type="number" min="1" max="65535" />
                 </div>
-                <div class="setting-field">
-                    <label for="set-correction-interval">Correction interval (min)</label>
-                    <input id="set-correction-interval" type="number" min="15" max="1440" step="1" />
-                </div>
-                <div class="setting-field">
-                    <label for="set-max-automatic-correction">Maximum automatic correction (°)</label>
-                    <input id="set-max-automatic-correction" type="number" min="0.1" max="1" step="0.1" />
+                <div class="settings-subgroup">
+                    <div class="setting-field">
+                        <label for="set-automatic-corrections">Automatic corrections</label>
+                        <input id="set-automatic-corrections" type="checkbox" />
+                    </div>
+                    <div class="setting-field">
+                        <label for="set-correction-interval">Correction interval (min)</label>
+                        <input id="set-correction-interval" type="number" min="15" max="1440" step="1" value="15" />
+                    </div>
+                    <div class="setting-field">
+                        <label for="set-max-automatic-correction">Maximum automatic correction (°)</label>
+                        <input id="set-max-automatic-correction" type="number" min="0.1" max="1" step="0.1" value="1" />
+                    </div>
                 </div>
             </div>
             <div class="settings-actions">
@@ -246,6 +248,6 @@
             <span id="ws-label">Disconnected</span>
         </div>
     </main>
-    <script src="/js/app.js?v=onstep-calibration-home-recovery-1"></script>
+    <script src="/js/app.js?v=solver-settings-visibility-2"></script>
 </body>
 </html>

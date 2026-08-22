@@ -59,8 +59,11 @@
         // Settings elements
         setBackend: document.getElementById('set-backend'),
         setFovEstimate: document.getElementById('set-fov-estimate'),
+        setFovEstimateField: document.getElementById('set-fov-estimate-field'),
         setHintTimeout: document.getElementById('set-hint-timeout'),
+        setHintTimeoutField: document.getElementById('set-hint-timeout-field'),
         setSolveRadius: document.getElementById('set-solve-radius'),
+        setSolveRadiusField: document.getElementById('set-solve-radius-field'),
         setShutter: document.getElementById('set-shutter'),
         setGain: document.getElementById('set-gain'),
         setWidth: document.getElementById('set-width'),
@@ -72,7 +75,9 @@
         setCorrectionInterval: document.getElementById('set-correction-interval'),
         setMaxAutomaticCorrection: document.getElementById('set-max-automatic-correction'),
         setTetra3Index: document.getElementById('set-tetra3-index'),
+        setTetra3IndexField: document.getElementById('set-tetra3-index-field'),
         setAstrometryIndex: document.getElementById('set-astrometry-index'),
+        setAstrometryIndexField: document.getElementById('set-astrometry-index-field'),
         settingsSave: document.getElementById('settings-save'),
         settingsMsg: document.getElementById('settings-msg'),
         // Update section
@@ -553,6 +558,18 @@
 
     // -- Settings panel --
 
+    function updateSolverSettingVisibility() {
+        var backend = els.setBackend.value;
+        var isAstrometry = backend === 'astrometry';
+        var usesFovEstimate = backend === 'tetra3' || isAstrometry;
+
+        els.setFovEstimateField.hidden = !usesFovEstimate;
+        els.setHintTimeoutField.hidden = !isAstrometry;
+        els.setSolveRadiusField.hidden = !isAstrometry;
+        els.setTetra3IndexField.hidden = backend !== 'tetra3';
+        els.setAstrometryIndexField.hidden = !isAstrometry;
+    }
+
     function loadSettings() {
         fetch('/settings')
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -565,6 +582,7 @@
                     els.setSolveRadius.value = data.solver.solveRadius || 20;
                     els.setTetra3Index.value = (data.solver.tetra3 && data.solver.tetra3.indexPath) || '';
                     els.setAstrometryIndex.value = (data.solver.astrometry && data.solver.astrometry.indexPath) || '';
+                    updateSolverSettingVisibility();
                 }
                 if (data.camera) {
                     els.setShutter.value = data.camera.shutterUs || 1000000;
@@ -577,12 +595,14 @@
                     els.setAutomaticCorrections.checked = !!data.onstep.automaticCorrectionsEnabled;
                     els.setOnstepHost.value = data.onstep.host || 'localhost';
                     els.setOnstepPort.value = data.onstep.port || 9998;
-                    els.setCorrectionInterval.value = data.onstep.correctionIntervalMinutes || 15;
-                    els.setMaxAutomaticCorrection.value = data.onstep.maxAutomaticCorrectionDeg || 1;
+                    els.setCorrectionInterval.value = data.onstep.correctionIntervalMinutes != null ? data.onstep.correctionIntervalMinutes : 15;
+                    els.setMaxAutomaticCorrection.value = data.onstep.maxAutomaticCorrectionDeg != null ? data.onstep.maxAutomaticCorrectionDeg : 1;
                 }
             })
             .catch(function () { /* ignore */ });
     }
+
+    els.setBackend.addEventListener('change', updateSolverSettingVisibility);
 
     els.settingsSave.addEventListener('click', function () {
         els.settingsMsg.textContent = '';

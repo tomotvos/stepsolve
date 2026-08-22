@@ -429,12 +429,12 @@ details summary {
 
 /* Settings panel */
 .settings-group {
-    margin-bottom: 1.25rem;
-    padding-bottom: 0.35rem;
+    margin: 0;
 }
 
 .settings-group + .settings-group {
-    padding-top: 0.75rem;
+    margin-top: 1.25rem;
+    padding-top: 0.5rem;
     border-top: 1px solid var(--border);
 }
 
@@ -449,11 +449,20 @@ details summary {
     border-bottom: 1px solid var(--border);
 }
 
+.settings-subgroup {
+    margin-top: 0.65rem;
+    padding-top: 0.45rem;
+}
+
 .setting-field {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 0.3rem 0;
+}
+
+.setting-field[hidden] {
+    display: none;
 }
 
 .setting-field label {
