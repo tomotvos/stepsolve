@@ -24,7 +24,10 @@ public class CameraCaptureTests
         {
             var opts = Options.Create(new CameraOptions());
             var monitor = new OptionsMonitorWrapper<CameraOptions>(opts);
-            var capture = new CameraCapture(monitor, NullLogger<CameraCapture>.Instance);
+            var capture = new CameraCapture(
+                monitor,
+                new StoragePaths(new ConfigurationBuilder().Build()),
+                NullLogger<CameraCapture>.Instance);
 
             var result = await capture.CaptureAsync(CancellationToken.None);
 
@@ -45,7 +48,10 @@ public class CameraCaptureTests
 
         var opts = Options.Create(new CameraOptions());
         var monitor = new OptionsMonitorWrapper<CameraOptions>(opts);
-        var capture = new CameraCapture(monitor, NullLogger<CameraCapture>.Instance);
+        var capture = new CameraCapture(
+            monitor,
+            new StoragePaths(new ConfigurationBuilder().Build()),
+            NullLogger<CameraCapture>.Instance);
 
         // Just verify construction succeeds and capture doesn't throw
         Assert.NotNull(capture);

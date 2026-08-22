@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using StepSolve.Solvers;
 
@@ -54,6 +55,12 @@ public class AstrometrySolverIntegrationTests : IDisposable
         var opts = new SolverOptions { FovEstimateDeg = 0 };
         return new AstrometrySolver(
             new TestOptionsMonitor<SolverOptions>(opts),
+            new StoragePaths(new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["StepSolve:DataDirectory"] = _tempDir,
+                })
+                .Build()),
             NullLogger<AstrometrySolver>.Instance);
     }
 

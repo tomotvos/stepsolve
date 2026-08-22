@@ -41,6 +41,7 @@ public class ApiEndpointTests
                     services.Configure<CameraOptions>(context.Configuration.GetSection(CameraOptions.Section));
                     services.Configure<OnStepOptions>(context.Configuration.GetSection(OnStepOptions.Section));
                     services.AddSingleton<SolveState>();
+                    services.AddSingleton<StoragePaths>();
                     services.AddSingleton<ISolver, AstrometrySolver>();
                     services.AddSingleton<OnStepClient>();
                     services.AddSingleton<IOnStepCalibrationController, TestCalibrationController>();

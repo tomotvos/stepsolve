@@ -57,6 +57,14 @@ public sealed class SolveState
         }
     }
 
+    public void ClearImagePath()
+    {
+        lock (_lock)
+        {
+            _lastImagePath = null;
+        }
+    }
+
     /// <summary>
     /// Get RA/Dec for LX200 server. Returns (0,0) if no solve available.
     /// </summary>

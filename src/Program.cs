@@ -29,6 +29,7 @@ builder.Services.Configure<OnStepOptions>(builder.Configuration.GetSection(OnSte
 
 // Shared state — singleton, thread-safe
 builder.Services.AddSingleton<SolveState>();
+builder.Services.AddSingleton<StoragePaths>();
 
 // HttpClient for GitHub Releases update checks
 builder.Services.AddHttpClient();
@@ -253,7 +254,7 @@ app.MapPost("/onstep/calibration/simulation", async (
 });
 
 // POST /solve — on-demand solve: demo pulse (?demo=1) or uploaded image
-app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, WebSocketBroadcaster ws, OnStepClient onstep, IOptions<StepSolveOptions> opts, ILogger<Program> logger) =>
+app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, WebSocketBroadcaster ws, OnStepClient onstep, IOptions<StepSolveOptions> opts, StoragePaths storagePaths, ILogger<Program> logger) =>
 {
     if (ctx.Request.Query.ContainsKey("demo"))
     {
@@ -284,33 +285,41 @@ app.MapPost("/solve", async (HttpContext ctx, ISolver solver, SolveState state, 
     if (ctx.Request.HasFormContentType && ctx.Request.Form.Files.Count > 0)
     {
         var file = ctx.Request.Form.Files[0];
-        var tempDir = Path.Combine(AppContext.BaseDirectory, "images");
+        var tempDir = storagePaths.ImagesDirectory;
         Directory.CreateDirectory(tempDir);
         var tempPath = Path.Combine(tempDir, $"upload_{DateTimeOffset.UtcNow.Ticks}.jpg");
-
-        await using (var stream = File.Create(tempPath))
+        try
         {
-            await file.CopyToAsync(stream, ctx.RequestAborted);
+            await using (var stream = File.Create(tempPath))
+            {
+                await file.CopyToAsync(stream, ctx.RequestAborted);
+            }
+
+            var uploadResult = await solver.SolveAsync(tempPath, hints: null, ctx.RequestAborted);
+            if (uploadResult.IsValid)
+            {
+                // Uploaded images are diagnostic inputs, not retained captures.
+                state.UpdateResult(uploadResult);
+                state.ClearImagePath();
+                _ = ws.BroadcastSolve(uploadResult, hasImage: false);
+                _ = ws.BroadcastStatus(opts.Value.Mode, "solved", onstep);
+            }
+
+            return Results.Ok(new
+            {
+                ra = uploadResult.RaDeg,
+                dec = uploadResult.DecDeg,
+                confidence = uploadResult.Confidence,
+                solver = uploadResult.SolverName,
+                solveTimeMs = uploadResult.SolveTime.TotalMilliseconds,
+                valid = uploadResult.IsValid,
+                imageUrl = (string?)null,
+            });
         }
-
-        var uploadResult = await solver.SolveAsync(tempPath, hints: null, ctx.RequestAborted);
-        if (uploadResult.IsValid)
+        finally
         {
-            state.UpdateResult(uploadResult, tempPath);
-            _ = ws.BroadcastSolve(uploadResult, hasImage: true);
-            _ = ws.BroadcastStatus(opts.Value.Mode, "solved", onstep);
+            DeleteUploadArtifacts(tempDir, Path.GetFileNameWithoutExtension(tempPath));
         }
-
-        return Results.Ok(new
-        {
-            ra = uploadResult.RaDeg,
-            dec = uploadResult.DecDeg,
-            confidence = uploadResult.Confidence,
-            solver = uploadResult.SolverName,
-            solveTimeMs = uploadResult.SolveTime.TotalMilliseconds,
-            valid = uploadResult.IsValid,
-            imageUrl = uploadResult.IsValid ? "/solve/image" : (string?)null,
-        });
     }
 
     // No file — solve the last captured image (calibrate / idle / demo)
@@ -499,6 +508,15 @@ static bool TryParseHomeStrategy(string? value, out CalibrationHomeStrategy stra
         _ => default,
     };
     return value?.ToLowerInvariant() is "at-home" or "return-home" or "recover-home";
+}
+
+static void DeleteUploadArtifacts(string directory, string fileStem)
+{
+    foreach (var path in Directory.GetFiles(directory, $"{fileStem}*"))
+    {
+        try { File.Delete(path); }
+        catch { /* Best-effort cleanup; a later upload cannot reuse this unique name. */ }
+    }
 }
 
 // Request DTOs

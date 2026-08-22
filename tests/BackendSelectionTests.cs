@@ -13,6 +13,7 @@ public class BackendSelectionTests
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Solver:Backend"] = backend })
             .Build());
+        services.AddSingleton<StoragePaths>();
         services.Configure<SolverOptions>(_ => { });
         services.Configure<CameraOptions>(_ => { });
         services.Configure<OnStepOptions>(_ => { });

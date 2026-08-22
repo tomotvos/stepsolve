@@ -55,6 +55,16 @@ public class AstrometrySolverTests
     }
 
     [Fact]
+    public void BuildArgs_WithOutputDirectory()
+    {
+        var args = AstrometrySolver.BuildArgs(
+            "/tmp/test.jpg", new AstrometryOptions(), hints: null, keepXyPath: null,
+            outputDirectory: "/var/lib/stepsolve/images");
+
+        Assert.Contains("--dir /var/lib/stepsolve/images", args);
+    }
+
+    [Fact]
     public void BuildArgs_EmptyIndexPath_OmitsFlag()
     {
         var opts = new AstrometryOptions { IndexPath = "" };

@@ -8,13 +8,18 @@ namespace StepSolve.Solvers;
 public sealed partial class AstrometrySolver : ISolver
 {
     private readonly IOptionsMonitor<SolverOptions> _options;
+    private readonly StoragePaths _storagePaths;
     private readonly ILogger<AstrometrySolver> _logger;
     private SolveResult? _lastResult;
     private DateTimeOffset _lastSolveTime;
 
-    public AstrometrySolver(IOptionsMonitor<SolverOptions> options, ILogger<AstrometrySolver> logger)
+    public AstrometrySolver(
+        IOptionsMonitor<SolverOptions> options,
+        StoragePaths storagePaths,
+        ILogger<AstrometrySolver> logger)
     {
         _options = options;
+        _storagePaths = storagePaths;
         _logger = logger;
     }
 
@@ -29,10 +34,12 @@ public sealed partial class AstrometrySolver : ISolver
 
         // Phase 1: Hinted solve (if we have recent hints)
         var effectiveHints = GetEffectiveHints(hints, opts.HintTimeout);
-        var basePath = Path.ChangeExtension(imagePath, null);
-        var xyPath = basePath + ".xy";
+        Directory.CreateDirectory(_storagePaths.ImagesDirectory);
+        var xyPath = Path.Combine(
+            _storagePaths.ImagesDirectory,
+            Path.GetFileNameWithoutExtension(imagePath) + ".xy");
 
-        var result = await RunSolveField(imagePath, astroOpts, effectiveHints, xyPath, sw, ct);
+        var result = await RunSolveField(imagePath, astroOpts, effectiveHints, xyPath, _storagePaths.ImagesDirectory, sw, ct);
         if (result.IsValid)
         {
             CacheResult(result);
@@ -43,7 +50,7 @@ public sealed partial class AstrometrySolver : ISolver
         if (opts.EnableFallback && File.Exists(xyPath))
         {
             _logger.LogInformation("Phase 1 failed, attempting unhinted fallback with XY file");
-            result = await RunSolveField(xyPath, astroOpts, hints: null, keepXyPath: null, sw, ct);
+            result = await RunSolveField(xyPath, astroOpts, hints: null, keepXyPath: null, _storagePaths.ImagesDirectory, sw, ct);
             if (result.IsValid)
             {
                 CacheResult(result);
@@ -81,11 +88,12 @@ public sealed partial class AstrometrySolver : ISolver
         AstrometryOptions opts,
         SolveHints? hints,
         string? keepXyPath,
+        string outputDirectory,
         Stopwatch sw,
         CancellationToken ct)
     {
         var fov = _options.CurrentValue.FovEstimateDeg > 0 ? _options.CurrentValue.FovEstimateDeg : (double?)null;
-        var args = BuildArgs(inputPath, opts, hints, keepXyPath, fov);
+        var args = BuildArgs(inputPath, opts, hints, keepXyPath, fov, outputDirectory);
         _logger.LogDebug("Running: {Cmd} {Args}", opts.SolveFieldPath, args);
 
         try
@@ -133,7 +141,13 @@ public sealed partial class AstrometrySolver : ISolver
         }
     }
 
-    internal static string BuildArgs(string inputPath, AstrometryOptions opts, SolveHints? hints, string? keepXyPath, double? fovEstimateDeg = null)
+    internal static string BuildArgs(
+        string inputPath,
+        AstrometryOptions opts,
+        SolveHints? hints,
+        string? keepXyPath,
+        double? fovEstimateDeg = null,
+        string? outputDirectory = null)
     {
         var parts = new List<string>
         {
@@ -152,6 +166,9 @@ public sealed partial class AstrometrySolver : ISolver
 
         if (!string.IsNullOrEmpty(opts.IndexPath))
             parts.AddRange(["--index-dir", opts.IndexPath]);
+
+        if (!string.IsNullOrEmpty(outputDirectory))
+            parts.AddRange(["--dir", outputDirectory]);
 
         if (fovEstimateDeg.HasValue)
         {

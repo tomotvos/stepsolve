@@ -20,11 +20,14 @@ public sealed class CameraCapture : ICameraCapture
     private readonly string _outputDir;
     private readonly bool _isLinux;
 
-    public CameraCapture(IOptionsMonitor<CameraOptions> options, ILogger<CameraCapture> logger)
+    public CameraCapture(
+        IOptionsMonitor<CameraOptions> options,
+        StoragePaths storagePaths,
+        ILogger<CameraCapture> logger)
     {
         _options = options;
         _logger = logger;
-        _outputDir = Path.Combine(AppContext.BaseDirectory, "images");
+        _outputDir = storagePaths.ImagesDirectory;
         Directory.CreateDirectory(_outputDir);
         _isLinux = OperatingSystem.IsLinux();
     }
