@@ -118,7 +118,7 @@ public class SettingsServiceTests
     }
 
     [Fact]
-    public void Validate_InvalidSyncMode_ReturnsError()
+    public void Validate_LegacySyncMode_PassesThrough()
     {
         var svc = CreateService(Path.GetTempFileName());
         var settings = new Dictionary<string, Dictionary<string, object>>
@@ -126,9 +126,50 @@ public class SettingsServiceTests
             ["OnStep"] = new() { ["SyncMode"] = "invalid" },
         };
 
-        var error = svc.Validate(settings);
-        Assert.NotNull(error);
-        Assert.Contains("SyncMode", error);
+        Assert.Null(svc.Validate(settings));
+    }
+
+    [Fact]
+    public void Validate_InvalidAutomaticCorrectionSettings_ReturnsError()
+    {
+        var svc = CreateService(Path.GetTempFileName());
+
+        var intervalError = svc.Validate(new Dictionary<string, Dictionary<string, object>>
+        {
+            ["OnStep"] = new() { ["CorrectionIntervalMinutes"] = "0" },
+        });
+        var correctionError = svc.Validate(new Dictionary<string, Dictionary<string, object>>
+        {
+            ["OnStep"] = new() { ["MaxAutomaticCorrectionDeg"] = "0" },
+        });
+        var shortIntervalError = svc.Validate(new Dictionary<string, Dictionary<string, object>>
+        {
+            ["OnStep"] = new() { ["CorrectionIntervalMinutes"] = "14" },
+        });
+        var largeCorrectionError = svc.Validate(new Dictionary<string, Dictionary<string, object>>
+        {
+            ["OnStep"] = new() { ["MaxAutomaticCorrectionDeg"] = "1.1" },
+        });
+        var nonFiniteCorrectionError = svc.Validate(new Dictionary<string, Dictionary<string, object>>
+        {
+            ["OnStep"] = new() { ["MaxAutomaticCorrectionDeg"] = "NaN" },
+        });
+        var timestampWriteError = svc.Validate(new Dictionary<string, Dictionary<string, object>>
+        {
+            ["OnStep"] = new() { ["LastAutomaticCorrectionAtUtc"] = DateTimeOffset.UtcNow.ToString("O") },
+        });
+        var nonFiniteConfidenceError = svc.Validate(new Dictionary<string, Dictionary<string, object>>
+        {
+            ["OnStep"] = new() { ["MinSolveConfidence"] = "NaN" },
+        });
+
+        Assert.Contains("CorrectionIntervalMinutes", intervalError);
+        Assert.Contains("MaxAutomaticCorrectionDeg", correctionError);
+        Assert.Contains("CorrectionIntervalMinutes", shortIntervalError);
+        Assert.Contains("MaxAutomaticCorrectionDeg", largeCorrectionError);
+        Assert.Contains("MaxAutomaticCorrectionDeg", nonFiniteCorrectionError);
+        Assert.Contains("LastAutomaticCorrectionAtUtc", timestampWriteError);
+        Assert.Contains("MinSolveConfidence", nonFiniteConfidenceError);
     }
 
     [Fact]
@@ -307,6 +348,28 @@ public class SettingsServiceTests
             Assert.Contains("true", json);    // not "true"
             Assert.Contains("9998", json);     // not "9998"
             Assert.Contains("5", json);
+        }
+        finally
+        {
+            File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
+    public void RecordAutomaticCorrection_PersistsRestartSafeCooldownTimestamp()
+    {
+        var tempPath = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(tempPath, "{}");
+            var svc = CreateService(tempPath);
+            var timestamp = new DateTimeOffset(2026, 8, 22, 12, 34, 56, TimeSpan.Zero);
+
+            svc.RecordAutomaticCorrection(timestamp);
+
+            var json = File.ReadAllText(tempPath);
+            Assert.Contains("LastAutomaticCorrectionAtUtc", json);
+            Assert.Contains("2026-08-22T12:34:56.0000000", json);
         }
         finally
         {

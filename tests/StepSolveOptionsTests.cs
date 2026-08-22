@@ -58,6 +58,9 @@ public class StepSolveOptionsTests
         Assert.Equal(5.0, opts.MaxSyncDeltaDeg);
         Assert.Equal("probe", opts.StartupPolicy);
         Assert.Equal("validate", opts.BackgroundPolicy);
+        Assert.False(opts.AutomaticCorrectionsEnabled);
+        Assert.Equal(15, opts.CorrectionIntervalMinutes);
+        Assert.Equal(1.0, opts.MaxAutomaticCorrectionDeg);
         Assert.Equal(1, opts.StableSolveIntervalSeconds);
         Assert.Equal(3, opts.CalibrationSettleSeconds);
         Assert.Empty(opts.CalibrationTargets);

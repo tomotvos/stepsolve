@@ -144,12 +144,18 @@ public sealed class StepSolveService : BackgroundService
             _ = _ws.BroadcastSolve(result, hasImage: true);
             _ = _ws.BroadcastStatus(CurrentMode, "solved", _onstep);
 
-            // Automatic mount mutation is intentionally disabled. The default
-            // OnStep background policy is read-only validation; model points
-            // are added only by the explicit Calibrate-mode approval flow.
+            // The controller owns the full automatic-correction gate. It is a
+            // no-op unless the operator has enabled it in Settings.
+            if (_calibration != null)
+                await _calibration.SubmitAutomaticCorrectionCandidateAsync(result, ct);
         }
         else
         {
+            // Let the automatic-correction controller invalidate any pending
+            // stability pair. A failed solve must not be skipped between two
+            // otherwise matching candidates.
+            if (_calibration != null)
+                await _calibration.SubmitAutomaticCorrectionCandidateAsync(result, ct);
             _state.SetState("idle");
             _ = _ws.BroadcastStatus(CurrentMode, "idle", _onstep);
             _logger.LogDebug("Solve returned no result");

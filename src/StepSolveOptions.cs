@@ -69,6 +69,8 @@ public sealed class OnStepOptions
     public int Port { get; set; } = 9998;
     /// <summary>Maximum time for one TCP connect-and-command exchange with OnStep.</summary>
     public int CommandTimeoutSeconds { get; set; } = 10;
+    // Retained only so existing runtime configuration files continue to bind.
+    // Automatic sync policy is controlled by the explicit settings below.
     public string SyncMode { get; set; } = "sync";
     public double MaxSyncDeltaDeg { get; set; } = 5.0;
 
@@ -76,6 +78,14 @@ public sealed class OnStepOptions
     // legacy SyncMode remains for compatibility with existing configurations.
     public string StartupPolicy { get; set; } = "probe";
     public string BackgroundPolicy { get; set; } = "validate";
+    /// <summary>Permits narrowly gated one-point corrections during normal Solve mode.</summary>
+    public bool AutomaticCorrectionsEnabled { get; set; }
+    /// <summary>Minimum time between successful automatic one-point corrections.</summary>
+    public int CorrectionIntervalMinutes { get; set; } = 15;
+    /// <summary>Largest OnStep-to-solve residual that may be corrected automatically.</summary>
+    public double MaxAutomaticCorrectionDeg { get; set; } = 1.0;
+    /// <summary>Persisted timestamp used to preserve the automatic-correction cooldown across restarts.</summary>
+    public DateTimeOffset? LastAutomaticCorrectionAtUtc { get; set; }
     public double MinSolveConfidence { get; set; } = 0.90;
     public int StableSolveIntervalSeconds { get; set; } = 1;
     public double MaxSolveDisagreementDeg { get; set; } = 0.05;

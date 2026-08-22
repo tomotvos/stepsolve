@@ -13,6 +13,7 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
     private readonly OnStepClient _onstep;
     private readonly IOptionsMonitor<OnStepOptions> _options;
     private readonly ILogger<OnStepCalibrationController> _logger;
+    private readonly SettingsService? _settings;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     private OnStepCalibrationStatus _status = IdleStatus();
@@ -24,6 +25,9 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
     private SolveResult? _firstStableSolve;
     private DateTimeOffset _nextSolveAttemptAt = DateTimeOffset.MinValue;
     private SolveResult? _candidate;
+    private SolveResult? _firstAutomaticCorrectionSolve;
+    private DateTimeOffset _firstAutomaticCorrectionSolveAt;
+    private DateTimeOffset _lastAutomaticCorrectionAt;
     private bool _simulationEnabled;
     private int _simulationSample;
     private bool _probePending = true;
@@ -34,15 +38,25 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
     private string? _lastConfiguredStartupPolicy;
     private static readonly TimeSpan ProbeRetryDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan HealthyProbeInterval = TimeSpan.FromSeconds(15);
+    private const double MinimumAutomaticSolveConfidence = 0.90;
+    private const double MaximumAutomaticSolveDisagreementDeg = 0.05;
+    private const int MinimumAutomaticStabilitySeconds = 1;
+    private const int MaximumAutomaticStabilitySeconds = 300;
+    private const int MinimumAutomaticCorrectionIntervalMinutes = 15;
+    private const int MaximumAutomaticCorrectionIntervalMinutes = 1440;
+    private const double MaximumAutomaticCorrectionDeg = 1.0;
 
     public OnStepCalibrationController(
         OnStepClient onstep,
         IOptionsMonitor<OnStepOptions> options,
-        ILogger<OnStepCalibrationController> logger)
+        ILogger<OnStepCalibrationController> logger,
+        SettingsService? settings = null)
     {
         _onstep = onstep;
         _options = options;
         _logger = logger;
+        _settings = settings;
+        _lastAutomaticCorrectionAt = options.CurrentValue.LastAutomaticCorrectionAtUtc ?? default;
     }
 
     public OnStepCalibrationStatus Status => Volatile.Read(ref _status);
@@ -441,6 +455,183 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
         }
     }
 
+    /// <summary>
+    /// Considers a fresh Solve-mode result for a one-point automatic correction.
+    /// This is deliberately separate from the guided three-point alignment flow:
+    /// it never slews or starts an alignment and it is inert until enabled by the
+    /// operator. A status check immediately before the mutation prevents a sync
+    /// while OnStep is reporting a GoTo or other motion beyond normal tracking.
+    /// </summary>
+    public async Task SubmitAutomaticCorrectionCandidateAsync(SolveResult result, CancellationToken ct)
+    {
+        var options = _options.CurrentValue;
+        if (!options.Enabled || !options.AutomaticCorrectionsEnabled || IsActive(Status.State))
+        {
+            _firstAutomaticCorrectionSolve = null;
+            return;
+        }
+
+        await _gate.WaitAsync(ct);
+        try
+        {
+            // Re-read configuration after waiting for an active protocol action.
+            options = _options.CurrentValue;
+            if (!options.Enabled || !options.AutomaticCorrectionsEnabled || IsActive(Status.State))
+            {
+                _firstAutomaticCorrectionSolve = null;
+                return;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (!double.IsFinite(options.MinSolveConfidence))
+            {
+                _logger.LogWarning("Automatic OnStep correction disabled by invalid safety configuration.");
+                _firstAutomaticCorrectionSolve = null;
+                return;
+            }
+            var minimumConfidence = Math.Clamp(options.MinSolveConfidence, MinimumAutomaticSolveConfidence, 1.0);
+            var stabilitySeconds = Math.Clamp(options.StableSolveIntervalSeconds,
+                MinimumAutomaticStabilitySeconds, MaximumAutomaticStabilitySeconds);
+            var correctionIntervalMinutes = Math.Clamp(options.CorrectionIntervalMinutes,
+                MinimumAutomaticCorrectionIntervalMinutes, MaximumAutomaticCorrectionIntervalMinutes);
+            if (!double.IsFinite(options.MaxSolveDisagreementDeg) || options.MaxSolveDisagreementDeg <= 0 ||
+                !double.IsFinite(options.MaxAutomaticCorrectionDeg) || options.MaxAutomaticCorrectionDeg <= 0)
+            {
+                _logger.LogWarning("Automatic OnStep correction disabled by invalid safety configuration.");
+                _firstAutomaticCorrectionSolve = null;
+                return;
+            }
+            var maximumDisagreement = Math.Min(options.MaxSolveDisagreementDeg, MaximumAutomaticSolveDisagreementDeg);
+            var maximumCorrection = Math.Min(options.MaxAutomaticCorrectionDeg, MaximumAutomaticCorrectionDeg);
+            if (options.LastAutomaticCorrectionAtUtc > _lastAutomaticCorrectionAt)
+                _lastAutomaticCorrectionAt = options.LastAutomaticCorrectionAtUtc.Value;
+            if (_lastAutomaticCorrectionAt != default &&
+                now - _lastAutomaticCorrectionAt < TimeSpan.FromMinutes(correctionIntervalMinutes))
+                return;
+
+            if (!result.IsValid || !double.IsFinite(result.RaDeg) || !double.IsFinite(result.DecDeg) ||
+                !double.IsFinite(result.Confidence) || result.Confidence < minimumConfidence)
+            {
+                // The two qualifying solves must be consecutive fresh captures.
+                _firstAutomaticCorrectionSolve = null;
+                return;
+            }
+
+            if (_firstAutomaticCorrectionSolve == null)
+            {
+                _firstAutomaticCorrectionSolve = result;
+                _firstAutomaticCorrectionSolveAt = now;
+                return;
+            }
+
+            var maximumCandidateAge = TimeSpan.FromSeconds(Math.Max(10, stabilitySeconds * 3));
+            if (now - _firstAutomaticCorrectionSolveAt > maximumCandidateAge)
+            {
+                _firstAutomaticCorrectionSolve = result;
+                _firstAutomaticCorrectionSolveAt = now;
+                return;
+            }
+
+            var first = _firstAutomaticCorrectionSolve.Value;
+            var disagreement = OnStepClient.AngularDistance(first.RaDeg, first.DecDeg, result.RaDeg, result.DecDeg);
+            if (disagreement > maximumDisagreement)
+            {
+                _logger.LogInformation("Automatic OnStep correction deferred: consecutive solves differ by {Disagreement:F3}°", disagreement);
+                _firstAutomaticCorrectionSolve = result;
+                _firstAutomaticCorrectionSolveAt = now;
+                return;
+            }
+            if (now - _firstAutomaticCorrectionSolveAt < TimeSpan.FromSeconds(stabilitySeconds))
+                return;
+
+            var mount = await _onstep.GetStatusAsync(ct);
+            if (!IsSafe(mount))
+            {
+                _logger.LogInformation("Automatic OnStep correction deferred: mount is moving, parked, parking, or homing ({Status})", mount.Raw);
+                _firstAutomaticCorrectionSolve = null;
+                return;
+            }
+
+            var reported = await _onstep.GetPositionAsync(ct);
+            if (!double.IsFinite(reported.RaDeg) || !double.IsFinite(reported.DecDeg))
+            {
+                _logger.LogWarning("Automatic OnStep correction rejected: OnStep returned non-finite coordinates.");
+                _firstAutomaticCorrectionSolve = null;
+                return;
+            }
+            var residual = OnStepClient.AngularDistance(reported.RaDeg, reported.DecDeg, result.RaDeg, result.DecDeg);
+            if (!double.IsFinite(residual) || residual > maximumCorrection)
+            {
+                _logger.LogWarning(
+                    "Automatic OnStep correction rejected: measured delta {Residual:F3}° exceeds maximum automatic correction {Maximum:F3}°",
+                    residual, maximumCorrection);
+                _firstAutomaticCorrectionSolve = null;
+                return;
+            }
+
+            // Status may have changed while reading the mount position; check
+            // immediately before the non-idempotent :Sr/:Sd/:CM# exchange.
+            mount = await _onstep.GetStatusAsync(ct);
+            if (!IsSafe(mount))
+            {
+                _logger.LogInformation("Automatic OnStep correction deferred: mount began moving ({Status})", mount.Raw);
+                _firstAutomaticCorrectionSolve = null;
+                return;
+            }
+
+            // Settings are hot-reloaded. Revoking automatic correction must
+            // take effect before the non-idempotent mount command is sent.
+            options = _options.CurrentValue;
+            if (!options.Enabled || !options.AutomaticCorrectionsEnabled)
+            {
+                _logger.LogInformation("Automatic OnStep correction cancelled because it was disabled in Settings.");
+                _firstAutomaticCorrectionSolve = null;
+                return;
+            }
+            if (_lastAutomaticCorrectionAt != default &&
+                now - _lastAutomaticCorrectionAt < TimeSpan.FromMinutes(Math.Clamp(options.CorrectionIntervalMinutes,
+                    MinimumAutomaticCorrectionIntervalMinutes, MaximumAutomaticCorrectionIntervalMinutes)))
+            {
+                _firstAutomaticCorrectionSolve = null;
+                return;
+            }
+            if (!double.IsFinite(options.MaxAutomaticCorrectionDeg) || options.MaxAutomaticCorrectionDeg <= 0 ||
+                residual > Math.Min(options.MaxAutomaticCorrectionDeg, MaximumAutomaticCorrectionDeg))
+            {
+                _logger.LogWarning(
+                    "Automatic OnStep correction rejected: measured delta {Residual:F3}° exceeds maximum automatic correction {Maximum:F3}°",
+                    residual, Math.Min(options.MaxAutomaticCorrectionDeg, MaximumAutomaticCorrectionDeg));
+                _firstAutomaticCorrectionSolve = null;
+                return;
+            }
+
+            await _onstep.SyncAsync(result, ct);
+            if (_onstep.LastSyncResult == "ok")
+            {
+                _lastAutomaticCorrectionAt = DateTimeOffset.UtcNow;
+                _settings?.RecordAutomaticCorrection(_lastAutomaticCorrectionAt);
+                _logger.LogInformation("Automatic OnStep correction applied: residual {Residual:F3}°", residual);
+            }
+            _firstAutomaticCorrectionSolve = null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // SyncAsync normally absorbs transport errors, but the read-only
+            // safety queries can fail. Keep the solve loop healthy and allow a
+            // later fresh pair to try again.
+            _logger.LogWarning(ex, "Automatic OnStep correction safety check failed");
+            _firstAutomaticCorrectionSolve = null;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task<CalibrationActionResult> AcceptAsync(string currentMode, CancellationToken ct)
     {
         if (!IsCalibrateMode(currentMode))
@@ -749,7 +940,8 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
     private static bool IsActive(string state) => state is not ("Idle" or "Completed" or "Aborted" or "Failed");
 
     private static bool IsSafe(OnStepMountStatus mount) =>
-        !mount.IsSlewing && !mount.IsParked && !mount.IsParking && !mount.IsHoming;
+        !mount.IsSlewing && !mount.IsParked && !mount.IsParking && !mount.HasParkFailure &&
+        !mount.IsHoming && !mount.IsGuiding && !mount.HasGeneralError;
 
     private static bool IsSafeOrSlewing(OnStepMountStatus mount) =>
         !mount.IsParked && !mount.IsParking && !mount.IsHoming;

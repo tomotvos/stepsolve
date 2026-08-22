@@ -25,11 +25,6 @@ public sealed class OnStepClient : IDisposable
     private DateTimeOffset _lastSyncTime;
     private string? _lastSyncResult;
 
-    // Track last successfully synced position for safety threshold comparison
-    private double _lastSyncedRa;
-    private double _lastSyncedDec;
-    private bool _hasSyncedBefore;
-
     // Retry backoff state
     private int _consecutiveFailures;
     private static readonly int[] BackoffSeconds = [1, 2, 4, 8, 16, 30];
@@ -64,9 +59,11 @@ public sealed class OnStepClient : IDisposable
     }
 
     /// <summary>
-    /// Sync the solved coordinates to OnStep, if enabled and within safety threshold.
-    /// Compares against the last successfully synced position (not shared state) to
-    /// correctly detect large jumps from faulty solves.
+    /// Sync the solved coordinates to OnStep, if enabled.
+    ///
+    /// Eligibility is intentionally owned by <see cref="OnStepCalibrationController"/>:
+    /// it compares the solved position with OnStep's current reported position,
+    /// verifies the mount is stationary, and enforces the correction interval.
     /// This method does not throw — errors are logged and tracked.
     /// </summary>
     public async Task SyncAsync(SolveResult result, CancellationToken ct)
@@ -74,21 +71,6 @@ public sealed class OnStepClient : IDisposable
         var opts = _options.CurrentValue;
         if (!opts.Enabled)
             return;
-
-        // Safety check: if we have a previous synced position, verify the delta isn't too large
-        if (_hasSyncedBefore)
-        {
-            var delta = AngularDistance(_lastSyncedRa, _lastSyncedDec, result.RaDeg, result.DecDeg);
-            if (delta > opts.MaxSyncDeltaDeg)
-            {
-                _logger.LogWarning(
-                    "OnStep sync skipped: angular delta {Delta:F2}° exceeds threshold {Max:F1}°. " +
-                    "Previous sync: ({PrevRa:F4}, {PrevDec:F4}), Solved: ({Ra:F4}, {Dec:F4})",
-                    delta, opts.MaxSyncDeltaDeg, _lastSyncedRa, _lastSyncedDec, result.RaDeg, result.DecDeg);
-                _lastSyncResult = $"skipped: delta {delta:F2}° > {opts.MaxSyncDeltaDeg:F1}°";
-                return;
-            }
-        }
 
         try
         {
@@ -98,9 +80,6 @@ public sealed class OnStepClient : IDisposable
             _consecutiveFailures = 0;
             _lastSyncTime = DateTimeOffset.UtcNow;
             _lastSyncResult = "ok";
-            _lastSyncedRa = result.RaDeg;
-            _lastSyncedDec = result.DecDeg;
-            _hasSyncedBefore = true;
             _logger.LogInformation("OnStep sync: RA={Ra:F4}° Dec={Dec:F4}°", result.RaDeg, result.DecDeg);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

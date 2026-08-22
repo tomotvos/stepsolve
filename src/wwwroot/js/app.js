@@ -66,9 +66,11 @@
         setWidth: document.getElementById('set-width'),
         setHeight: document.getElementById('set-height'),
         setOnstepEnabled: document.getElementById('set-onstep-enabled'),
+        setAutomaticCorrections: document.getElementById('set-automatic-corrections'),
         setOnstepHost: document.getElementById('set-onstep-host'),
         setOnstepPort: document.getElementById('set-onstep-port'),
-        setMaxSyncDelta: document.getElementById('set-max-sync-delta'),
+        setCorrectionInterval: document.getElementById('set-correction-interval'),
+        setMaxAutomaticCorrection: document.getElementById('set-max-automatic-correction'),
         setTetra3Index: document.getElementById('set-tetra3-index'),
         setAstrometryIndex: document.getElementById('set-astrometry-index'),
         settingsSave: document.getElementById('settings-save'),
@@ -572,9 +574,11 @@
                 }
                 if (data.onstep) {
                     els.setOnstepEnabled.checked = !!data.onstep.enabled;
+                    els.setAutomaticCorrections.checked = !!data.onstep.automaticCorrectionsEnabled;
                     els.setOnstepHost.value = data.onstep.host || 'localhost';
                     els.setOnstepPort.value = data.onstep.port || 9998;
-                    els.setMaxSyncDelta.value = data.onstep.maxSyncDeltaDeg || 5;
+                    els.setCorrectionInterval.value = data.onstep.correctionIntervalMinutes || 15;
+                    els.setMaxAutomaticCorrection.value = data.onstep.maxAutomaticCorrectionDeg || 1;
                 }
             })
             .catch(function () { /* ignore */ });
@@ -599,9 +603,11 @@
             },
             OnStep: {
                 Enabled: els.setOnstepEnabled.checked.toString(),
+                AutomaticCorrectionsEnabled: els.setAutomaticCorrections.checked.toString(),
                 Host: els.setOnstepHost.value,
                 Port: els.setOnstepPort.value,
-                MaxSyncDeltaDeg: els.setMaxSyncDelta.value
+                CorrectionIntervalMinutes: els.setCorrectionInterval.value,
+                MaxAutomaticCorrectionDeg: els.setMaxAutomaticCorrection.value
             }
         };
 

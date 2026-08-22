@@ -15,7 +15,12 @@ public sealed record OnStepMountStatus(string Raw)
     public bool IsSlewing => !Raw.Contains('N');
     public bool IsParked => Raw.Contains('P');
     public bool IsParking => Raw.Contains('I');
+    public bool HasParkFailure => Raw.Contains('F');
     public bool IsHoming => Raw.Contains('h');
+    /// <summary>True while OnStep reports pulse or manual guiding activity.</summary>
+    public bool IsGuiding => Raw.Contains('G') || Raw.Contains('g');
+    /// <summary>OnStep's packed :GU# status ends with a non-zero general-error digit on fault.</summary>
+    public bool HasGeneralError => Raw.Length > 0 && char.IsDigit(Raw[^1]) && Raw[^1] != '0';
     public bool IsAtHome => Raw.Contains('H');
 }
 

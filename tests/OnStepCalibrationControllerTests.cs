@@ -86,6 +86,193 @@ public sealed class OnStepCalibrationControllerTests
     }
 
     [Fact]
+    public async Task AutomaticCorrection_RequiresTwoStableSolvesAndUsesCurrentMountResidual()
+    {
+        await using var mount = new MockOnStep();
+        var controller = CreateController(new OnStepOptions
+        {
+            Enabled = true,
+            AutomaticCorrectionsEnabled = true,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+            StableSolveIntervalSeconds = 0,
+            MaxAutomaticCorrectionDeg = 1,
+            CorrectionIntervalMinutes = 15,
+        });
+        var solve = new SolveResult(180, 45, null, null, 0.99, TimeSpan.Zero, "stub");
+
+        await controller.SubmitAutomaticCorrectionCandidateAsync(solve, CancellationToken.None);
+        await WaitForAutomaticStabilityAsync();
+        await controller.SubmitAutomaticCorrectionCandidateAsync(solve, CancellationToken.None);
+        await controller.SubmitAutomaticCorrectionCandidateAsync(solve, CancellationToken.None);
+
+        var commands = await mount.StopAsync();
+        Assert.Equal(new[] { ":GU#", ":GR#", ":GD#", ":GU#", ":Sr12:00:00#", ":Sd+45*00:00#", ":CM#" }, commands);
+    }
+
+    [Fact]
+    public async Task AutomaticCorrection_RejectsResidualAboveConfiguredMaximum()
+    {
+        await using var mount = new MockOnStep();
+        var controller = CreateController(new OnStepOptions
+        {
+            Enabled = true,
+            AutomaticCorrectionsEnabled = true,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+            StableSolveIntervalSeconds = 0,
+            MaxAutomaticCorrectionDeg = 1,
+        });
+        var solve = new SolveResult(182, 45, null, null, 0.99, TimeSpan.Zero, "stub");
+
+        await controller.SubmitAutomaticCorrectionCandidateAsync(solve, CancellationToken.None);
+        await WaitForAutomaticStabilityAsync();
+        await controller.SubmitAutomaticCorrectionCandidateAsync(solve, CancellationToken.None);
+
+        var commands = await mount.StopAsync();
+        Assert.Equal(new[] { ":GU#", ":GR#", ":GD#" }, commands);
+    }
+
+    [Fact]
+    public async Task AutomaticCorrection_RejectsNonFiniteOnStepPosition()
+    {
+        await using var mount = new MockOnStep { RightAscensionReply = "NaN#" };
+        var controller = CreateController(new OnStepOptions
+        {
+            Enabled = true,
+            AutomaticCorrectionsEnabled = true,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+        });
+        var solve = new SolveResult(180, 45, null, null, 0.99, TimeSpan.Zero, "stub");
+
+        await controller.SubmitAutomaticCorrectionCandidateAsync(solve, CancellationToken.None);
+        await WaitForAutomaticStabilityAsync();
+        await controller.SubmitAutomaticCorrectionCandidateAsync(solve, CancellationToken.None);
+
+        var commands = await mount.StopAsync();
+        Assert.Equal(new[] { ":GU#", ":GR#", ":GD#" }, commands);
+    }
+
+    [Fact]
+    public async Task AutomaticCorrection_DoesNotSyncWhileOnStepReportsMotion()
+    {
+        await using var mount = new MockOnStep { StatusReply = "pH#" };
+        var controller = CreateController(new OnStepOptions
+        {
+            Enabled = true,
+            AutomaticCorrectionsEnabled = true,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+            StableSolveIntervalSeconds = 0,
+        });
+        var solve = new SolveResult(180, 45, null, null, 0.99, TimeSpan.Zero, "stub");
+
+        await controller.SubmitAutomaticCorrectionCandidateAsync(solve, CancellationToken.None);
+        await WaitForAutomaticStabilityAsync();
+        await controller.SubmitAutomaticCorrectionCandidateAsync(solve, CancellationToken.None);
+
+        var commands = await mount.StopAsync();
+        Assert.Equal(new[] { ":GU#" }, commands);
+    }
+
+    [Fact]
+    public async Task AutomaticCorrection_DoesNotSyncWhileOnStepReportsGuiding()
+    {
+        await using var mount = new MockOnStep { StatusReply = "NG#" };
+        var controller = CreateController(new OnStepOptions
+        {
+            Enabled = true,
+            AutomaticCorrectionsEnabled = true,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+            StableSolveIntervalSeconds = 0,
+        });
+        var solve = new SolveResult(180, 45, null, null, 0.99, TimeSpan.Zero, "stub");
+
+        await controller.SubmitAutomaticCorrectionCandidateAsync(solve, CancellationToken.None);
+        await WaitForAutomaticStabilityAsync();
+        await controller.SubmitAutomaticCorrectionCandidateAsync(solve, CancellationToken.None);
+
+        var commands = await mount.StopAsync();
+        Assert.Equal(new[] { ":GU#" }, commands);
+    }
+
+    [Fact]
+    public async Task AutomaticCorrection_RequiresTwoHighConfidenceSolvesWithoutAnInterveningFailure()
+    {
+        await using var mount = new MockOnStep();
+        var controller = CreateController(new OnStepOptions
+        {
+            Enabled = true,
+            AutomaticCorrectionsEnabled = true,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+            StableSolveIntervalSeconds = 0,
+        });
+        var good = new SolveResult(180, 45, null, null, 0.99, TimeSpan.Zero, "stub");
+        var lowConfidence = good with { Confidence = 0.5 };
+
+        await controller.SubmitAutomaticCorrectionCandidateAsync(good, CancellationToken.None);
+        await controller.SubmitAutomaticCorrectionCandidateAsync(lowConfidence, CancellationToken.None);
+        await controller.SubmitAutomaticCorrectionCandidateAsync(good, CancellationToken.None);
+
+        var commands = await mount.StopAsync();
+        Assert.Empty(commands);
+    }
+
+    [Fact]
+    public async Task AutomaticCorrection_ResetsWhenAConflictingSolveArrivesInsideStabilityInterval()
+    {
+        await using var mount = new MockOnStep();
+        var controller = CreateController(new OnStepOptions
+        {
+            Enabled = true,
+            AutomaticCorrectionsEnabled = true,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+        });
+        var first = new SolveResult(180, 45, null, null, 0.99, TimeSpan.Zero, "stub");
+        var conflicting = first with { RaDeg = 181 };
+
+        await controller.SubmitAutomaticCorrectionCandidateAsync(first, CancellationToken.None);
+        await controller.SubmitAutomaticCorrectionCandidateAsync(conflicting, CancellationToken.None);
+        await WaitForAutomaticStabilityAsync();
+        await controller.SubmitAutomaticCorrectionCandidateAsync(first, CancellationToken.None);
+
+        var commands = await mount.StopAsync();
+        Assert.Empty(commands);
+    }
+
+    [Fact]
+    public async Task AutomaticCorrection_CancelsWhenOperatorDisablesItDuringSafetyChecks()
+    {
+        await using var mount = new MockOnStep();
+        var options = new OnStepOptions
+        {
+            Enabled = true,
+            AutomaticCorrectionsEnabled = true,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+            StableSolveIntervalSeconds = 0,
+        };
+        var controller = CreateController(options);
+        mount.BeforeReply = command =>
+        {
+            if (command == ":GU#")
+                options.AutomaticCorrectionsEnabled = false;
+        };
+        var solve = new SolveResult(180, 45, null, null, 0.99, TimeSpan.Zero, "stub");
+
+        await controller.SubmitAutomaticCorrectionCandidateAsync(solve, CancellationToken.None);
+        await WaitForAutomaticStabilityAsync();
+        await controller.SubmitAutomaticCorrectionCandidateAsync(solve, CancellationToken.None);
+
+        var commands = await mount.StopAsync();
+        Assert.Equal(new[] { ":GU#", ":GR#", ":GD#", ":GU#" }, commands);
+    }
+
+    [Fact]
     public async Task Simulation_IsTemporaryAndCreatesStableSolvesFromOnStepPosition()
     {
         await using var mount = new MockOnStep();
@@ -339,14 +526,14 @@ public sealed class OnStepCalibrationControllerTests
         Assert.True(controller.NeedsFreshSolve);
     }
 
+    private static Task WaitForAutomaticStabilityAsync() => Task.Delay(TimeSpan.FromMilliseconds(1050));
+
     private sealed class MockOnStep : IAsyncDisposable
     {
         private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
         private readonly CancellationTokenSource _cts = new();
         private readonly List<string> _commands = [];
         private readonly Task _server;
-        private bool _atHome;
-
         public MockOnStep()
         {
             _listener.Start();
@@ -355,6 +542,10 @@ public sealed class OnStepCalibrationControllerTests
         }
 
         public int Port { get; }
+        public string StatusReply { get; set; } = "N#";
+        public string RightAscensionReply { get; set; } = "12:00:00#";
+        public string DeclinationReply { get; set; } = "+45*00:00#";
+        public Action<string>? BeforeReply { get; set; }
 
         public async Task<IReadOnlyList<string>> StopAsync()
         {
@@ -391,6 +582,7 @@ public sealed class OnStepCalibrationControllerTests
                         var text = command.ToString();
                         command.Clear();
                         _commands.Add(text);
+                        BeforeReply?.Invoke(text);
                         var reply = ReplyFor(text);
                         if (reply.Length > 0)
                             await stream.WriteAsync(Encoding.ASCII.GetBytes(reply), _cts.Token);
@@ -405,9 +597,9 @@ public sealed class OnStepCalibrationControllerTests
         {
             ":GVP#" => "OnStepX#",
             ":GVN#" => "1.0#",
-            ":GU#" => _atHome ? "NH#" : "N#",
-            ":GR#" => "12:00:00#",
-            ":GD#" => "+45*00:00#",
+            ":GU#" => StatusReply,
+            ":GR#" => RightAscensionReply,
+            ":GD#" => DeclinationReply,
             ":A3#" => "1",
             ":So90#" => "1",
             ":CM#" => "N/A#",
@@ -424,7 +616,7 @@ public sealed class OnStepCalibrationControllerTests
 
         private string SetHomeAndReturnNoReply()
         {
-            _atHome = true;
+            StatusReply = "NH#";
             return string.Empty;
         }
     }

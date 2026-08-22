@@ -25,11 +25,6 @@ public sealed class SettingsService
         "solve", "demo", "idle", "calibrate"
     };
 
-    private static readonly HashSet<string> ValidSyncModes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "sync", "align"
-    };
-
     public SettingsService(IConfiguration config)
     {
         _config = config;
@@ -75,6 +70,13 @@ public sealed class SettingsService
         return null;
     }
 
+    /// <summary>Records an accepted automatic correction so its cooldown survives a restart.</summary>
+    public void RecordAutomaticCorrection(DateTimeOffset timestamp) =>
+        PersistAutomaticCorrection(new Dictionary<string, Dictionary<string, object>>
+        {
+            ["OnStep"] = new() { ["LastAutomaticCorrectionAtUtc"] = timestamp.ToString("O") },
+        });
+
     internal string? Validate(Dictionary<string, Dictionary<string, object>> settings)
     {
         foreach (var (section, values) in settings)
@@ -98,8 +100,12 @@ public sealed class SettingsService
                     "Camera:Width" => ValidPositiveInt(value, "Width"),
                     "Camera:Height" => ValidPositiveInt(value, "Height"),
                     "OnStep:Port" => ValidPort(value),
-                    "OnStep:MaxSyncDeltaDeg" => ValidPositiveDouble(value, "MaxSyncDeltaDeg"),
-                    "OnStep:SyncMode" => ValidSyncModes.Contains(value) ? null : "SyncMode must be sync or align",
+                    "OnStep:CorrectionIntervalMinutes" => ValidRangeInt(value, "CorrectionIntervalMinutes", 15, 1440),
+                    "OnStep:MaxAutomaticCorrectionDeg" => ValidFiniteDoubleInRange(value, "MaxAutomaticCorrectionDeg", 0, 1),
+                    "OnStep:MinSolveConfidence" => ValidFiniteDoubleInRange(value, "MinSolveConfidence", 0.899999, 1),
+                    "OnStep:StableSolveIntervalSeconds" => ValidRangeInt(value, "StableSolveIntervalSeconds", 1, 300),
+                    "OnStep:MaxSolveDisagreementDeg" => ValidFiniteDoubleInRange(value, "MaxSolveDisagreementDeg", 0, 0.05),
+                    "OnStep:LastAutomaticCorrectionAtUtc" => "LastAutomaticCorrectionAtUtc is managed by StepSolve.",
                     _ => null // Unknown keys pass through
                 };
 
@@ -144,6 +150,18 @@ public sealed class SettingsService
         }
     }
 
+    private void PersistAutomaticCorrection(Dictionary<string, Dictionary<string, object>> settings)
+    {
+        foreach (var (section, values) in settings)
+        {
+            foreach (var (key, value) in values)
+                _config[$"{section}:{key}"] = value?.ToString();
+        }
+        Persist(settings);
+        if (_config is IConfigurationRoot configurationRoot)
+            configurationRoot.Reload();
+    }
+
     private static void SetNestedValue(JsonObject node, string[] segments, string strVal)
     {
         for (int i = 0; i < segments.Length - 1; i++)
@@ -186,6 +204,20 @@ public sealed class SettingsService
     {
         if (!double.TryParse(value, out var n) || n <= 0)
             return $"{name} must be a positive number";
+        return null;
+    }
+
+    private static string? ValidRangeInt(string value, string name, int minimum, int maximum)
+    {
+        if (!int.TryParse(value, out var n) || n < minimum || n > maximum)
+            return $"{name} must be between {minimum} and {maximum}";
+        return null;
+    }
+
+    private static string? ValidFiniteDoubleInRange(string value, string name, double exclusiveMinimum, double maximum)
+    {
+        if (!double.TryParse(value, out var n) || !double.IsFinite(n) || n <= exclusiveMinimum || n > maximum)
+            return $"{name} must be greater than {exclusiveMinimum} and no more than {maximum}";
         return null;
     }
 

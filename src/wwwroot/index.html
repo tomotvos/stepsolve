@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>StepSolve</title>
-    <link rel="stylesheet" href="/css/app.css?v=calibration-home-menu-1">
+    <link rel="stylesheet" href="/css/app.css?v=automatic-corrections-1">
 </head>
 <body>
     <header>
@@ -170,6 +170,10 @@
                     <input id="set-onstep-enabled" type="checkbox" />
                 </div>
                 <div class="setting-field">
+                    <label for="set-automatic-corrections">Automatic corrections</label>
+                    <input id="set-automatic-corrections" type="checkbox" />
+                </div>
+                <div class="setting-field">
                     <label for="set-onstep-host">Host</label>
                     <input id="set-onstep-host" type="text" />
                 </div>
@@ -178,8 +182,12 @@
                     <input id="set-onstep-port" type="number" min="1" max="65535" />
                 </div>
                 <div class="setting-field">
-                    <label for="set-max-sync-delta">Max Sync Delta (°)</label>
-                    <input id="set-max-sync-delta" type="number" min="0.1" max="90" step="0.1" />
+                    <label for="set-correction-interval">Correction interval (min)</label>
+                    <input id="set-correction-interval" type="number" min="15" max="1440" step="1" />
+                </div>
+                <div class="setting-field">
+                    <label for="set-max-automatic-correction">Maximum automatic correction (°)</label>
+                    <input id="set-max-automatic-correction" type="number" min="0.1" max="1" step="0.1" />
                 </div>
             </div>
             <div class="settings-actions">

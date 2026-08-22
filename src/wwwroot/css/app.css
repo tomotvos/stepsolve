@@ -429,7 +429,13 @@ details summary {
 
 /* Settings panel */
 .settings-group {
-    margin-bottom: 0.75rem;
+    margin-bottom: 1.25rem;
+    padding-bottom: 0.35rem;
+}
+
+.settings-group + .settings-group {
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
 }
 
 .settings-group h3 {

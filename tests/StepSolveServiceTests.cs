@@ -82,6 +82,8 @@ public class StepSolveServiceTests
             return Task.CompletedTask;
         }
 
+        public Task SubmitAutomaticCorrectionCandidateAsync(SolveResult result, CancellationToken ct) => Task.CompletedTask;
+
         public Task WaitForSubmissionAsync(CancellationToken ct) => _submitted.Task.WaitAsync(ct);
     }
 

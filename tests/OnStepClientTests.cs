@@ -69,7 +69,7 @@ public class OnStepClientTests
     // --- Safety Threshold ---
 
     [Fact]
-    public async Task SyncAsync_Skips_WhenDeltaExceedsThreshold()
+    public async Task SyncAsync_DoesNotCompareTargetToPreviousSync()
     {
         var opts = new TestOptionsMonitor<OnStepOptions>(new OnStepOptions
         {
@@ -109,11 +109,27 @@ public class OnStepClientTests
 
         Assert.Equal("ok", client.LastSyncResult);
 
-        // Now attempt a solve 20° away — should exceed 5° threshold and be skipped
+        // A new target 20° away is legitimate. Eligibility now belongs to the
+        // automatic-correction controller, which compares against OnStep's
+        // current reported position rather than the prior sync.
+        mockServer = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port);
+        mockServer.Start();
+        serverTask = Task.Run(async () =>
+        {
+            using var sc = await mockServer.AcceptTcpClientAsync();
+            using var stream = sc.GetStream();
+            await ReplyToCommandsAsync(stream, [
+                (":Sr08:00:00#", "1"),
+                (":Sd+50*00:00#", "1"),
+                (":CM#", "N/A#"),
+            ]);
+        });
         var bigJump = new SolveResult(120, 50, null, null, 0.9, TimeSpan.Zero, "test");
         await client.SyncAsync(bigJump, CancellationToken.None);
+        await serverTask;
+        mockServer.Stop();
 
-        Assert.Contains("skipped", client.LastSyncResult);
+        Assert.Equal("ok", client.LastSyncResult);
     }
 
     [Fact]
@@ -286,6 +302,22 @@ public class OnStepClientTests
         Assert.Equal(1, alignment.CurrentStar);
         Assert.Equal(3, alignment.LastRequiredStar);
         Assert.True(alignment.IsActive);
+    }
+
+    [Fact]
+    public void MountStatus_IdentifiesGuidingFlags()
+    {
+        Assert.True(new OnStepMountStatus("NG").IsGuiding);
+        Assert.True(new OnStepMountStatus("Ng").IsGuiding);
+        Assert.False(new OnStepMountStatus("N").IsGuiding);
+    }
+
+    [Fact]
+    public void MountStatus_IdentifiesReportedFaults()
+    {
+        Assert.True(new OnStepMountStatus("NF").HasParkFailure);
+        Assert.True(new OnStepMountStatus("NpA2601").HasGeneralError);
+        Assert.False(new OnStepMountStatus("NpA2600").HasGeneralError);
     }
 
     [Fact]

@@ -76,5 +76,6 @@ public interface IOnStepCalibrationSession : IOnStepCalibrationController
     Task InitializeAsync(CancellationToken ct);
     Task TickAsync(CancellationToken ct);
     Task SubmitFreshSolveAsync(SolveResult result, CancellationToken ct);
+    Task SubmitAutomaticCorrectionCandidateAsync(SolveResult result, CancellationToken ct);
     Task<SolveResult> CreateSimulatedSolveAsync(CancellationToken ct);
 }
