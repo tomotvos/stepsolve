@@ -140,7 +140,17 @@ public class ApiEndpointTests
                             if (request?.Confirmed != true)
                                 return Results.BadRequest(new { error = "Starting alignment requires explicit confirmation" });
 
-                            var result = await controller.StartAsync(request.Confirmed, (config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(), ctx.RequestAborted);
+                            var homeStrategy = request.HomeStrategy?.ToLowerInvariant() switch
+                            {
+                                "at-home" => CalibrationHomeStrategy.AtHome,
+                                "return-home" => CalibrationHomeStrategy.ReturnToHome,
+                                "recover-home" => CalibrationHomeStrategy.RecoverHome,
+                                _ => (CalibrationHomeStrategy?)null,
+                            };
+                            if (homeStrategy == null)
+                                return Results.BadRequest(new { error = "Choose a Home strategy" });
+
+                            var result = await controller.StartAsync(request.Confirmed, homeStrategy.Value, (config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(), ctx.RequestAborted);
                             return result.Success
                                 ? Results.Ok(new { calibration = controller.Status })
                                 : Results.BadRequest(new { error = result.Error, calibration = controller.Status });
@@ -331,6 +341,30 @@ public class ApiEndpointTests
     }
 
     [Fact]
+    public async Task PostOnStepAlignmentStart_RequiresHomeStrategy()
+    {
+        var host = CreateTestHost();
+        await host.StartAsync();
+        try
+        {
+            var client = host.GetTestServer().CreateClient();
+            await client.PostAsync("/mode", new StringContent("{\"mode\":\"calibrate\"}", Encoding.UTF8, "application/json"));
+
+            var response = await client.PostAsync("/onstep/alignment/start",
+                new StringContent("{\"confirmed\":true}", Encoding.UTF8, "application/json"));
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Contains("Home strategy", json.GetProperty("error").GetString());
+        }
+        finally
+        {
+            await host.StopAsync();
+            host.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task PostOnStepAlignmentStart_InCalibrateMode_ReturnsUpdatedStatus()
     {
         var host = CreateTestHost();
@@ -341,7 +375,7 @@ public class ApiEndpointTests
             var setMode = await client.PostAsync("/mode", new StringContent("{\"mode\":\"calibrate\"}", Encoding.UTF8, "application/json"));
             Assert.Equal(HttpStatusCode.OK, setMode.StatusCode);
 
-            var response = await client.PostAsync("/onstep/alignment/start", new StringContent("{\"confirmed\":true}", Encoding.UTF8, "application/json"));
+            var response = await client.PostAsync("/onstep/alignment/start", new StringContent("{\"confirmed\":true,\"homeStrategy\":\"at-home\"}", Encoding.UTF8, "application/json"));
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             var json = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -591,7 +625,7 @@ public class ApiEndpointTests
 }
 
 record ModeRequest(string? Mode);
-record StartAlignmentRequest(bool Confirmed);
+record StartAlignmentRequest(bool Confirmed, string? HomeStrategy);
 record SimulationRequest(bool Enabled);
 
 sealed class TestCalibrationController : IOnStepCalibrationController
@@ -612,7 +646,7 @@ sealed class TestCalibrationController : IOnStepCalibrationController
 
     public OnStepCalibrationStatus Status => _status;
 
-    public Task<CalibrationActionResult> StartAsync(bool confirmed, string currentMode, CancellationToken ct)
+    public Task<CalibrationActionResult> StartAsync(bool confirmed, CalibrationHomeStrategy homeStrategy, string currentMode, CancellationToken ct)
     {
         if (!confirmed)
             return Task.FromResult(new CalibrationActionResult(false, "Confirmation required"));

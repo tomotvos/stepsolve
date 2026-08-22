@@ -49,7 +49,7 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
 
     // After a disagreement, this temporarily becomes false to prevent the
     // capture loop from spending solver time until the retry backoff expires.
-    public bool NeedsFreshSolve => Status.State == "AwaitingStableSolves" &&
+    public bool NeedsFreshSolve => (Status.State is "AwaitingStableSolves" or "RecoveringHomeSolves") &&
         DateTimeOffset.UtcNow >= _nextSolveAttemptAt;
     public bool WantsImmediateFollowUpSolve => _firstStableSolve != null && NeedsFreshSolve;
     public bool UsesSimulatedSolves => _simulationEnabled && NeedsFreshSolve;
@@ -190,7 +190,11 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
         }
     }
 
-    public async Task<CalibrationActionResult> StartAsync(bool confirmed, string currentMode, CancellationToken ct)
+    public async Task<CalibrationActionResult> StartAsync(
+        bool confirmed,
+        CalibrationHomeStrategy homeStrategy,
+        string currentMode,
+        CancellationToken ct)
     {
         if (!confirmed)
             return new(false, "Starting alignment requires explicit confirmation.");
@@ -245,17 +249,16 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
                 _candidate = null;
                 _nextSolveAttemptAt = DateTimeOffset.MinValue;
                 _simulationSample = 0;
-                var homing = await _onstep.ReturnHomeAsync(ct);
-                if (!homing.Succeeded)
+                return homeStrategy switch
                 {
-                    SetStatus("Failed", true, true, homing.Error, homing.Response);
-                    return new(false, homing.Error ?? "OnStep rejected the Home command.");
-                }
-
-                SetStatus("ReturningHome", true, true,
-                    $"Connected to {identity.Product} {identity.FirmwareVersion}; returning mount to Home before point 1.");
-                _logger.LogInformation("OnStep alignment start: commanded physical return to Home; waiting for H status");
-                return new(true, null);
+                    CalibrationHomeStrategy.AtHome => await StartThreePointAlignmentAtHomeAsync(
+                        $"Connected to {identity.Product} {identity.FirmwareVersion}; operator confirmed the rig is physically at Home.", ct),
+                    CalibrationHomeStrategy.ReturnToHome => await ReturnToHomeBeforeAlignmentAsync(
+                        $"Connected to {identity.Product} {identity.FirmwareVersion}; returning mount to Home before point 1.", ct),
+                    CalibrationHomeStrategy.RecoverHome => BeginHomeRecovery(
+                        $"Connected to {identity.Product} {identity.FirmwareVersion}; collect two matching plate solves to recover current pointing before returning Home."),
+                    _ => new(false, "Unknown Home strategy."),
+                };
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -274,6 +277,11 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
             _gate.Release();
         }
     }
+
+    // Retained for existing in-process callers. New API callers must choose a
+    // Home strategy explicitly; the historical behavior was to return Home.
+    public Task<CalibrationActionResult> StartAsync(bool confirmed, string currentMode, CancellationToken ct) =>
+        StartAsync(confirmed, CalibrationHomeStrategy.ReturnToHome, currentMode, ct);
 
     public async Task TickAsync(CancellationToken ct)
     {
@@ -309,16 +317,7 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
                         return;
                     }
 
-                    var started = await _onstep.StartAlignmentAsync(3, ct);
-                    if (!started.Succeeded)
-                    {
-                        SetStatus("Failed", true, true, started.Error, started.Response);
-                        return;
-                    }
-
-                    SetStatus("StartingAlignment", true, true,
-                        "Mount is at Home; starting point 1.", started.Response);
-                    await CommandCurrentTargetAsync(ct);
+                    await StartThreePointAlignmentAtHomeAsync("Mount is at Home; starting point 1.", ct);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
@@ -387,16 +386,22 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
 
     public async Task SubmitFreshSolveAsync(SolveResult result, CancellationToken ct)
     {
-        if (Status.State != "AwaitingStableSolves")
+        if (Status.State is not ("AwaitingStableSolves" or "RecoveringHomeSolves"))
             return;
 
         await _gate.WaitAsync(ct);
         try
         {
-            if (Status.State != "AwaitingStableSolves")
+            if (Status.State is not ("AwaitingStableSolves" or "RecoveringHomeSolves"))
                 return;
 
             var options = _options.CurrentValue;
+            if (Status.State == "RecoveringHomeSolves")
+            {
+                await SubmitHomeRecoverySolveAsync(result, options, ct);
+                return;
+            }
+
             if (!result.IsValid || result.Confidence < options.MinSolveConfidence)
             {
                 _logger.LogInformation("OnStep calibration point {Point} did not produce a usable solve", _pointIndex + 1);
@@ -562,6 +567,100 @@ public sealed class OnStepCalibrationController : IOnStepCalibrationSession
         finally
         {
             _gate.Release();
+        }
+    }
+
+    private CalibrationActionResult BeginHomeRecovery(string message)
+    {
+        SetStatus("RecoveringHomeSolves", true, true, message);
+        _logger.LogInformation("OnStep Home recovery started; waiting for two stable plate solves");
+        return new(true, null);
+    }
+
+    private async Task<CalibrationActionResult> ReturnToHomeBeforeAlignmentAsync(string message, CancellationToken ct)
+    {
+        var homing = await _onstep.ReturnHomeAsync(ct);
+        if (!homing.Succeeded)
+        {
+            SetStatus("Failed", true, true, homing.Error, homing.Response);
+            return new(false, homing.Error ?? "OnStep rejected the Home command.");
+        }
+
+        SetStatus("ReturningHome", true, true, message);
+        _logger.LogInformation("OnStep alignment start: commanded physical return to Home; waiting for H status");
+        return new(true, null);
+    }
+
+    private async Task<CalibrationActionResult> StartThreePointAlignmentAtHomeAsync(string message, CancellationToken ct)
+    {
+        var started = await _onstep.StartAlignmentAsync(3, ct);
+        if (!started.Succeeded)
+        {
+            SetStatus("Failed", true, true, started.Error, started.Response);
+            return new(false, started.Error ?? "OnStep did not start the three-point alignment.");
+        }
+
+        SetStatus("StartingAlignment", true, true, message, started.Response);
+        return await CommandCurrentTargetAsync(ct);
+    }
+
+    private async Task SubmitHomeRecoverySolveAsync(SolveResult result, OnStepOptions options, CancellationToken ct)
+    {
+        if (!result.IsValid || result.Confidence < options.MinSolveConfidence)
+        {
+            SetStatus("RecoveringHomeSolves", true, true,
+                "A usable plate solve is required to recover Home. Retrying.");
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (_firstStableSolve == null)
+        {
+            _firstStableSolve = result;
+            SetStatus("RecoveringHomeSolves", true, true,
+                "First recovery solve received; waiting for a second solve to confirm it.");
+            return;
+        }
+
+        var firstSolve = _firstStableSolve.Value;
+        var disagreement = OnStepClient.AngularDistance(
+            firstSolve.RaDeg, firstSolve.DecDeg, result.RaDeg, result.DecDeg);
+        if (disagreement > options.MaxSolveDisagreementDeg)
+        {
+            _firstStableSolve = result;
+            _nextSolveAttemptAt = now.AddSeconds(options.StableSolveIntervalSeconds);
+            SetStatus("RecoveringHomeSolves", true, true,
+                $"Recovery solves differed by {disagreement:F3}°. Retrying comparison after {options.StableSolveIntervalSeconds}s.");
+            return;
+        }
+
+        try
+        {
+            SetStatus("SyncingRecoveredPosition", true, true,
+                "Recovered pointing verified; syncing it to OnStep before returning Home.", candidate: result);
+            var sync = await _onstep.SyncSolvedPositionAsync(result, ct);
+            if (!sync.Succeeded)
+            {
+                SetStatus("Failed", true, true, sync.Error, sync.Response, result);
+                return;
+            }
+
+            _firstStableSolve = null;
+            _nextSolveAttemptAt = DateTimeOffset.MinValue;
+            var home = await ReturnToHomeBeforeAlignmentAsync(
+                "Recovered pointing synced to OnStep; returning mount to Home before point 1.", ct);
+            if (!home.Success)
+                return;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "OnStep Home recovery failed");
+            RequestConnectionRecovery();
+            SetStatus("Failed", false, false, $"Unable to recover Home: {ex.Message}");
         }
     }
 

@@ -194,14 +194,16 @@ making ordinary camera calibration send mount commands.
 
 This is the recommended first mount-calibration feature.
 
-1. The dashboard explains prerequisites: rig physically at known home/park
-   reference (true north / camera level within approximately ±5°), safe sky,
-   tracking enabled as appropriate, and no other mount controller taking
-   control.
-2. The operator clicks **Start assisted 3-point alignment**. StepSolve probes
-   OnStep, verifies safe status, asks for a final confirmation, then sends
-   `:A3#`.
-3. StepSolve selects point 1 from a fixed, configured safe target plan. It
+1. The dashboard asks how Home will be established: the operator has placed
+   the rig at its physical reference (true north / camera level within
+   approximately ±5°); OnStep has a known current position and should return
+   to Home; or the current position is unknown and needs plate-solve recovery.
+2. For recovery, StepSolve requires two agreeing high-confidence solves,
+   sends `:Sr`, `:Sd`, `:CM#` to Sync the recovered pointing, then commands
+   `:hC#` and waits for the `H` status flag. This is a supervised convenience
+   path, not a replacement for physical Home sensing.
+3. Once Home is established, StepSolve sends `:A3#` and selects point 1 from a
+   fixed, configured safe target plan. It
    sends `:Sa`, `:Sz`, `:MA#`, waits for OnStep to report no active GoTo, then
    waits for a configurable settle period.
 4. StepSolve obtains two stable solves, displays the candidate RA/Dec and

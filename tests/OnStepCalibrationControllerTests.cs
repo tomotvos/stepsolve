@@ -175,6 +175,63 @@ public sealed class OnStepCalibrationControllerTests
     }
 
     [Fact]
+    public async Task StartAsync_AtHomeBeginsAlignmentWithoutCommandingReturnHome()
+    {
+        await using var mount = new MockOnStep();
+        var controller = CreateController(new OnStepOptions
+        {
+            Enabled = true,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+        });
+
+        var started = await controller.StartAsync(
+            true, CalibrationHomeStrategy.AtHome, "calibrate", CancellationToken.None);
+
+        Assert.True(started.Success);
+        Assert.Equal("WaitingForGoto", controller.Status.State);
+        var commands = await mount.StopAsync();
+        Assert.DoesNotContain(":hC#", commands);
+        Assert.Contains(":A3#", commands);
+    }
+
+    [Fact]
+    public async Task RecoverHome_UsesTwoStableSolvesThenSyncsBeforeReturningHome()
+    {
+        await using var mount = new MockOnStep();
+        var controller = CreateController(new OnStepOptions
+        {
+            Enabled = true,
+            Host = "127.0.0.1",
+            Port = mount.Port,
+            StableSolveIntervalSeconds = 0,
+        });
+        var solve = new SolveResult(100, 45, null, null, 0.99, TimeSpan.Zero, "stub");
+
+        var started = await controller.StartAsync(
+            true, CalibrationHomeStrategy.RecoverHome, "calibrate", CancellationToken.None);
+
+        Assert.True(started.Success);
+        Assert.Equal("RecoveringHomeSolves", controller.Status.State);
+        Assert.True(controller.NeedsFreshSolve);
+
+        await controller.SubmitFreshSolveAsync(solve, CancellationToken.None);
+        Assert.True(controller.WantsImmediateFollowUpSolve);
+        await controller.SubmitFreshSolveAsync(solve, CancellationToken.None);
+
+        Assert.Equal("ReturningHome", controller.Status.State);
+        await controller.TickAsync(CancellationToken.None);
+        Assert.Equal("WaitingForGoto", controller.Status.State);
+
+        var commands = await mount.StopAsync();
+        Assert.Contains(":Sr06:40:00#", commands);
+        Assert.Contains(":Sd+45*00:00#", commands);
+        Assert.Contains(":CM#", commands);
+        Assert.Contains(":hC#", commands);
+        Assert.Contains(":A3#", commands);
+    }
+
+    [Fact]
     public async Task StableSolveInterval_DoesNotDelayTheImmediateConfirmationSolve()
     {
         await using var mount = new MockOnStep();
@@ -353,6 +410,7 @@ public sealed class OnStepCalibrationControllerTests
             ":GD#" => "+45*00:00#",
             ":A3#" => "1",
             ":So90#" => "1",
+            ":CM#" => "N/A#",
             ":hC#" => SetHomeAndReturnNoReply(),
             ":A?#" => "321#",
             ":MA#" => "0",

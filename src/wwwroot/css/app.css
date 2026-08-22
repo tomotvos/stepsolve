@@ -110,7 +110,8 @@ header h1 {
     gap: 0.5rem;
 }
 
-#mode-select {
+#mode-select,
+.calibration-home-strategy select {
     background: var(--accent-dim);
     color: var(--text);
     border: 1px solid var(--accent);
@@ -222,15 +223,24 @@ details summary {
     line-height: 1.4;
 }
 
-.calibration-simulation {
+.calibration-home-strategy {
     display: block;
     margin-top: 0.75rem;
     color: var(--text-dim);
     font-size: 0.85rem;
 }
 
+/* Simulation control styles are retained with the dormant markup above. */
+/*
 .calibration-simulation input {
     margin-right: 0.4rem;
+}
+*/
+
+.calibration-home-strategy select {
+    display: block;
+    width: 100%;
+    margin-top: 0.3rem;
 }
 
 .calibration-actions {
@@ -366,6 +376,7 @@ details summary {
 
 #preview-img.visible {
     display: block;
+    cursor: zoom-in;
 }
 
 #no-image-msg {
@@ -376,6 +387,44 @@ details summary {
 
 #no-image-msg.hidden {
     display: none;
+}
+
+#image-dialog {
+    width: calc(100vw - 2rem);
+    height: calc(100vh - 2rem);
+    max-width: none;
+    max-height: none;
+    margin: auto;
+    padding: 0.75rem;
+    color: var(--text);
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+#image-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.75);
+}
+
+.image-dialog-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.image-dialog-content {
+    width: 100%;
+    height: calc(100% - 2.75rem);
+    overflow: auto;
+    background: #000;
+}
+
+#full-size-img {
+    display: block;
+    max-width: none;
+    max-height: none;
 }
 
 /* Settings panel */

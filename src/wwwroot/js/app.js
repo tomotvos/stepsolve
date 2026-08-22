@@ -37,7 +37,9 @@
         calibrationCandidate: document.getElementById('calibration-candidate'),
         calibrationReply: document.getElementById('calibration-reply'),
         calibrationMessage: document.getElementById('calibration-message'),
-        calibrationSimulation: document.getElementById('calibration-simulation'),
+        // Simulation control is retained below but dormant for field use.
+        // calibrationSimulation: document.getElementById('calibration-simulation'),
+        calibrationHomeStrategy: document.getElementById('calibration-home-strategy'),
         calibrationStart: document.getElementById('calibration-start'),
         calibrationReconnect: document.getElementById('calibration-reconnect'),
         calibrationAccept: document.getElementById('calibration-accept'),
@@ -51,6 +53,9 @@
         wsLabel: document.getElementById('ws-label'),
         previewImg: document.getElementById('preview-img'),
         noImageMsg: document.getElementById('no-image-msg'),
+        imageDialog: document.getElementById('image-dialog'),
+        imageDialogClose: document.getElementById('image-dialog-close'),
+        fullSizeImg: document.getElementById('full-size-img'),
         // Settings elements
         setBackend: document.getElementById('set-backend'),
         setFovEstimate: document.getElementById('set-fov-estimate'),
@@ -151,6 +156,12 @@
         };
     }
 
+    function showFullSizeImage() {
+        if (!els.previewImg.classList.contains('visible') || !els.previewImg.currentSrc) return;
+        els.fullSizeImg.src = els.previewImg.currentSrc;
+        els.imageDialog.showModal();
+    }
+
     function updateStateBadge(st) {
         if (!st) return;
         els.stateBadge.textContent = st;
@@ -213,14 +224,14 @@
             : '--';
         els.calibrationReply.textContent = calibration.lastReply || '--';
         els.calibrationMessage.textContent = calibration.message || '';
-        els.calibrationSimulation.checked = !!calibration.simulationEnabled;
+        // els.calibrationSimulation.checked = !!calibration.simulationEnabled;
 
         // These are presentation hints only. The server repeats every safety and
         // operating-mode check before issuing an OnStep command.
         var isCalibrateMode = state.mode === 'calibrate';
         var calibrationState = (calibration.state || '').toLowerCase();
         var activeAlignmentStates = [
-            'returninghome', 'startingalignment', 'gotopoint', 'waitingforgoto', 'settling',
+            'recoveringhomesolves', 'syncingrecoveredposition', 'returninghome', 'startingalignment', 'gotopoint', 'waitingforgoto', 'settling',
             'awaitingstablesolves', 'awaitingacceptance', 'acceptingpoint'
         ];
         var alignmentIsActive = activeAlignmentStates.indexOf(calibrationState) >= 0;
@@ -234,8 +245,9 @@
             calibrationState !== 'awaitingacceptance' ||
             calibration.candidateRaDeg == null || calibration.candidateDecDeg == null;
         els.calibrationAbort.disabled = !isCalibrateMode || !alignmentIsActive;
-        els.calibrationSimulation.disabled = !isCalibrateMode ||
-            alignmentIsActive;
+        // els.calibrationSimulation.disabled = !isCalibrateMode ||
+        //     alignmentIsActive;
+        els.calibrationHomeStrategy.disabled = !isCalibrateMode || alignmentIsActive;
     }
 
     function loadCalibrationStatus() {
@@ -469,8 +481,14 @@
     }
 
     els.calibrationStart.addEventListener('click', function () {
-        if (!window.confirm('Start the OnStep three-point alignment sequence? The mount will first return physically to Home (0,0), then move to its first configured target.')) return;
-        requestCalibrationAction('/onstep/alignment/start', { confirmed: true }, 'OnStep alignment started');
+        var homeStrategy = els.calibrationHomeStrategy.value;
+        var prompts = {
+            'at-home': 'Start the three-point alignment? Confirm the rig is physically at Home; it will then move to its first configured target.',
+            'return-home': 'Start the three-point alignment? OnStep will return from its known current position to Home, then move to its first configured target.',
+            'recover-home': 'Recover Home and start the three-point alignment? StepSolve will plate-solve the current pointing, Sync it to OnStep, command a return to Home, then begin the alignment.'
+        };
+        if (!window.confirm(prompts[homeStrategy])) return;
+        requestCalibrationAction('/onstep/alignment/start', { confirmed: true, homeStrategy: homeStrategy }, 'OnStep alignment started');
     });
 
     els.calibrationReconnect.addEventListener('click', function () {
@@ -487,10 +505,20 @@
         requestCalibrationAction('/onstep/alignment/abort', null, 'OnStep alignment aborted');
     });
 
+    /*
     els.calibrationSimulation.addEventListener('change', function () {
         requestCalibrationAction('/onstep/calibration/simulation',
             { enabled: els.calibrationSimulation.checked },
             els.calibrationSimulation.checked ? 'OnStep simulation enabled' : 'OnStep simulation disabled');
+    });
+    */
+
+    els.previewImg.addEventListener('click', showFullSizeImage);
+    els.imageDialogClose.addEventListener('click', function () {
+        els.imageDialog.close();
+    });
+    els.imageDialog.addEventListener('click', function (event) {
+        if (event.target === els.imageDialog) els.imageDialog.close();
     });
 
     els.logPause.addEventListener('click', function () {

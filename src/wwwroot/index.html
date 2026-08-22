@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>StepSolve</title>
-    <link rel="stylesheet" href="/css/app.css?v=amber-night-theme-3">
+    <link rel="stylesheet" href="/css/app.css?v=calibration-home-menu-1">
 </head>
 <body>
     <header>
@@ -38,7 +38,7 @@
         <section id="image-preview">
             <h2>Captured Image</h2>
             <div id="image-container">
-                <img id="preview-img" alt="Last captured image" />
+                <img id="preview-img" alt="Last captured image — click to view at full size" title="View full-size image" />
                 <div id="no-image-msg">No image captured yet</div>
             </div>
         </section>
@@ -65,9 +65,21 @@
             <div class="field"><label>Point / attempt</label><span id="calibration-point">--</span></div>
             <div class="field"><label>Candidate</label><span id="calibration-candidate">--</span></div>
             <div class="field"><label>Mount reply</label><span id="calibration-reply">--</span></div>
+            <!--
+            Simulation is retained for bench testing but intentionally hidden
+            from the field-calibration workflow.
             <label class="calibration-simulation">
                 <input id="calibration-simulation" type="checkbox" />
                 Simulation (temporary; uses OnStep's reported position)
+            </label>
+            -->
+            <label class="calibration-home-strategy">
+                Home before alignment
+                <select id="calibration-home-strategy">
+                    <option value="at-home">Rig is physically at Home</option>
+                    <option value="return-home">Known position — return to Home</option>
+                    <option value="recover-home">Unknown position — plate-solve and recover Home</option>
+                </select>
             </label>
             <p id="calibration-message" class="calibration-message">Switch to Calibrate mode to align OnStep.</p>
             <div class="calibration-actions">
@@ -210,12 +222,22 @@
             </div>
         </dialog>
 
+        <dialog id="image-dialog" aria-labelledby="image-dialog-title">
+            <div class="image-dialog-toolbar">
+                <span id="image-dialog-title">Captured image — native size</span>
+                <button id="image-dialog-close" class="btn-secondary" type="button">Close</button>
+            </div>
+            <div class="image-dialog-content">
+                <img id="full-size-img" alt="Full-size captured image" />
+            </div>
+        </dialog>
+
         <!-- Connection indicator -->
         <div id="connection-status" class="connection-bar">
             <span id="ws-indicator" class="indicator disconnected"></span>
             <span id="ws-label">Disconnected</span>
         </div>
     </main>
-    <script src="/js/app.js?v=onstep-calibration-controls-3"></script>
+    <script src="/js/app.js?v=onstep-calibration-home-recovery-1"></script>
 </body>
 </html>

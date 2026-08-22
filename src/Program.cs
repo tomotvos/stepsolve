@@ -205,7 +205,10 @@ app.MapPost("/onstep/alignment/start", async (
     if (request?.Confirmed != true)
         return Results.BadRequest(new { error = "Starting alignment requires explicit confirmation" });
 
-    var result = await controller.StartAsync(request.Confirmed, (config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(), ctx.RequestAborted);
+    if (!TryParseHomeStrategy(request.HomeStrategy, out var homeStrategy))
+        return Results.BadRequest(new { error = "Choose whether the rig is at Home, can return to Home, or needs Home recovery." });
+
+    var result = await controller.StartAsync(request.Confirmed, homeStrategy, (config["StepSolve:Mode"] ?? "demo").ToLowerInvariant(), ctx.RequestAborted);
     return result.Success
         ? Results.Ok(new { calibration = controller.Status })
         : Results.BadRequest(new { error = result.Error ?? "Unable to start alignment", calibration = controller.Status });
@@ -486,10 +489,22 @@ app.MapFallbackToFile("index.html");
 
 app.Run();
 
+static bool TryParseHomeStrategy(string? value, out CalibrationHomeStrategy strategy)
+{
+    strategy = value?.ToLowerInvariant() switch
+    {
+        "at-home" => CalibrationHomeStrategy.AtHome,
+        "return-home" => CalibrationHomeStrategy.ReturnToHome,
+        "recover-home" => CalibrationHomeStrategy.RecoverHome,
+        _ => default,
+    };
+    return value?.ToLowerInvariant() is "at-home" or "return-home" or "recover-home";
+}
+
 // Request DTOs
 record ModeRequest(string? Mode);
 record SimulationRequest(bool Enabled);
-record StartAlignmentRequest(bool Confirmed);
+record StartAlignmentRequest(bool Confirmed, string? HomeStrategy);
 
 // Update check state — populated once at startup, read by /system/update/check
 sealed class UpdateState(string currentVersion)

@@ -25,6 +25,28 @@ public sealed record OnStepCalibrationStatus(
 public sealed record CalibrationActionResult(bool Success, string? Error);
 
 /// <summary>
+/// How a calibration session establishes its mechanical Home reference before
+/// starting the three-point alignment.
+/// </summary>
+public enum CalibrationHomeStrategy
+{
+    /// <summary>The operator has physically placed the rig at Home.</summary>
+    AtHome,
+
+    /// <summary>
+    /// OnStep already has trustworthy coordinates, so it can return itself to
+    /// Home before the new alignment starts.
+    /// </summary>
+    ReturnToHome,
+
+    /// <summary>
+    /// StepSolve first plate-solves the current arbitrary pointing, Syncs it
+    /// to OnStep, then commands a supervised return to Home.
+    /// </summary>
+    RecoverHome,
+}
+
+/// <summary>
 /// Boundary between the dashboard/API and the calibration state machine.
 /// Implementations must validate connection, mount safety, and operating mode
 /// before issuing any OnStep command.
@@ -33,7 +55,7 @@ public interface IOnStepCalibrationController
 {
     OnStepCalibrationStatus Status { get; }
 
-    Task<CalibrationActionResult> StartAsync(bool confirmed, string currentMode, CancellationToken ct);
+    Task<CalibrationActionResult> StartAsync(bool confirmed, CalibrationHomeStrategy homeStrategy, string currentMode, CancellationToken ct);
     Task<CalibrationActionResult> AcceptAsync(string currentMode, CancellationToken ct);
     Task<CalibrationActionResult> AbortAsync(string currentMode, CancellationToken ct);
     Task<CalibrationActionResult> ReconnectAsync(string currentMode, CancellationToken ct);

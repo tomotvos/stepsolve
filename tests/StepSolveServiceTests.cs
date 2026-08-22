@@ -63,7 +63,7 @@ public class StepSolveServiceTests
 
         public Task InitializeAsync(CancellationToken ct) => Task.CompletedTask;
         public Task TickAsync(CancellationToken ct) => Task.CompletedTask;
-        public Task<CalibrationActionResult> StartAsync(bool confirmed, string currentMode, CancellationToken ct) => Task.FromResult(new CalibrationActionResult(true, null));
+        public Task<CalibrationActionResult> StartAsync(bool confirmed, CalibrationHomeStrategy homeStrategy, string currentMode, CancellationToken ct) => Task.FromResult(new CalibrationActionResult(true, null));
         public Task<CalibrationActionResult> AcceptAsync(string currentMode, CancellationToken ct) => Task.FromResult(new CalibrationActionResult(true, null));
         public Task<CalibrationActionResult> AbortAsync(string currentMode, CancellationToken ct) => Task.FromResult(new CalibrationActionResult(true, null));
         public Task<CalibrationActionResult> ReconnectAsync(string currentMode, CancellationToken ct) => Task.FromResult(new CalibrationActionResult(true, null));
